@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 
 from database import get_db, BinDB
 from models import Bin, CreateBinRequest, UpdateBinRequest
-from utils import determine_bin_status
+from utils import get_current_timestamp, format_timestamp_response, determine_bin_status
 
 router = APIRouter()
 

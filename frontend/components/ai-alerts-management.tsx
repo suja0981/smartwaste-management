@@ -1,5 +1,3 @@
-//AI alerts management UI. Currently uses mock data; should fetch alerts from backend (/ai_alerts endpoint).
-
 "use client"
 
 import { useState, useEffect } from "react"
@@ -10,158 +8,73 @@ import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog"
+import { useToast } from "@/hooks/use-toast"
+import { getAlerts, deleteAlert, type AIAlert } from "@/lib/api-client"
+import { mapAlertSeverity, formatTimestamp } from "@/lib/status-mapper"
 import {
   Search,
   AlertTriangle,
   Trash2,
   Droplets,
-  Camera,
-  MapPin,
-  Clock,
-  Eye,
   RefreshCw,
   CheckCircle,
   TrendingUp,
   Activity,
+  Loader2,
+  X,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 
-// Extended mock data for AI alerts
-const mockAlerts = [
-  {
-    id: "ALERT-001",
-    cameraId: "CAM-15",
-    type: "garbage",
-    confidence: 94,
-    timestamp: "2024-01-15T10:30:00Z",
-    timestampRelative: "2 minutes ago",
-    severity: "high",
-    location: "Main Street & 5th Ave",
-    binId: "BIN-001",
-    status: "active",
-    description: "Overflowing garbage detected near bin location",
-    imageUrl: "/overflowing-garbage-bin.png",
-    coordinates: { lat: 40.7128, lng: -74.006 },
-    assignedTo: null,
-    resolvedAt: null,
-  },
-  {
-    id: "ALERT-002",
-    cameraId: "CAM-08",
-    type: "spill",
-    confidence: 87,
-    timestamp: "2024-01-15T10:22:00Z",
-    timestampRelative: "10 minutes ago",
-    severity: "medium",
-    location: "Central Park North",
-    binId: "BIN-002",
-    status: "investigating",
-    description: "Liquid spill detected around waste collection area",
-    imageUrl: "/liquid-spill-near-bin.jpg",
-    coordinates: { lat: 40.7829, lng: -73.9654 },
-    assignedTo: "Crew Team A",
-    resolvedAt: null,
-  },
-  {
-    id: "ALERT-003",
-    cameraId: "CAM-22",
-    type: "garbage",
-    confidence: 91,
-    timestamp: "2024-01-15T10:15:00Z",
-    timestampRelative: "17 minutes ago",
-    severity: "high",
-    location: "Shopping District",
-    binId: "BIN-003",
-    status: "resolved",
-    description: "Scattered garbage around bin - cleaned up",
-    imageUrl: "/scattered-garbage-around-bin.jpg",
-    coordinates: { lat: 40.7589, lng: -73.9851 },
-    assignedTo: "Crew Team B",
-    resolvedAt: "2024-01-15T10:25:00Z",
-  },
-  {
-    id: "ALERT-004",
-    cameraId: "CAM-31",
-    type: "vandalism",
-    confidence: 78,
-    timestamp: "2024-01-15T09:45:00Z",
-    timestampRelative: "47 minutes ago",
-    severity: "low",
-    location: "University Campus",
-    binId: "BIN-004",
-    status: "active",
-    description: "Potential vandalism detected - bin appears damaged",
-    imageUrl: "/damaged-waste-bin.jpg",
-    coordinates: { lat: 40.7505, lng: -73.9934 },
-    assignedTo: null,
-    resolvedAt: null,
-  },
-  {
-    id: "ALERT-005",
-    cameraId: "CAM-19",
-    type: "spill",
-    confidence: 95,
-    timestamp: "2024-01-15T09:30:00Z",
-    timestampRelative: "1 hour ago",
-    severity: "high",
-    location: "Residential Area A",
-    binId: "BIN-005",
-    status: "investigating",
-    description: "Large liquid spill requiring immediate cleanup",
-    imageUrl: "/large-liquid-spill-cleanup.jpg",
-    coordinates: { lat: 40.7282, lng: -73.9942 },
-    assignedTo: "Crew Team C",
-    resolvedAt: null,
-  },
-]
-
-export function AIAlertsManagement() {
-  const [alerts, setAlerts] = useState(mockAlerts)
+export function AIAlertsManagementIntegrated() {
+  const [alerts, setAlerts] = useState<AIAlert[]>([])
+  const [loading, setLoading] = useState(true)
   const [searchTerm, setSearchTerm] = useState("")
   const [severityFilter, setSeverityFilter] = useState("all")
-  const [statusFilter, setStatusFilter] = useState("all")
   const [typeFilter, setTypeFilter] = useState("all")
-  const [selectedAlert, setSelectedAlert] = useState<(typeof mockAlerts)[0] | null>(null)
   const [isRealTimeEnabled, setIsRealTimeEnabled] = useState(true)
+  const { toast } = useToast()
 
-  // Simulate real-time updates
+  const fetchAlerts = async () => {
+    try {
+      const data = await getAlerts()
+      setAlerts(data)
+      setLoading(false)
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: error instanceof Error ? error.message : "Failed to load alerts",
+        variant: "destructive",
+      })
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    fetchAlerts()
+  }, [])
+
   useEffect(() => {
     if (!isRealTimeEnabled) return
-
-    const interval = setInterval(() => {
-      // Simulate new alert occasionally
-      if (Math.random() < 0.1) {
-        const newAlert = {
-          id: `ALERT-${Date.now()}`,
-          cameraId: `CAM-${Math.floor(Math.random() * 50) + 1}`,
-          type: ["garbage", "spill", "vandalism"][Math.floor(Math.random() * 3)],
-          confidence: Math.floor(Math.random() * 30) + 70,
-          timestamp: new Date().toISOString(),
-          timestampRelative: "Just now",
-          severity: ["low", "medium", "high"][Math.floor(Math.random() * 3)],
-          location: ["New Location", "Another Street", "Random Area"][Math.floor(Math.random() * 3)],
-          binId: `BIN-${Math.floor(Math.random() * 10) + 1}`,
-          status: "active",
-          description: "New AI detection alert",
-          imageUrl: "/new-alert-detection.jpg",
-          coordinates: { lat: 40.7 + Math.random() * 0.1, lng: -74 + Math.random() * 0.1 },
-          assignedTo: null,
-          resolvedAt: null,
-        }
-        setAlerts((prev) => [newAlert, ...prev])
-      }
-    }, 10000) // Check every 10 seconds
-
+    const interval = setInterval(fetchAlerts, 5000)
     return () => clearInterval(interval)
   }, [isRealTimeEnabled])
+
+  const handleDeleteAlert = async (id: number) => {
+    try {
+      await deleteAlert(id)
+      setAlerts(alerts.filter(a => a.id !== id))
+      toast({
+        title: "Success",
+        description: "Alert deleted successfully",
+      })
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: error instanceof Error ? error.message : "Failed to delete alert",
+        variant: "destructive",
+      })
+    }
+  }
 
   const getSeverityColor = (severity: string) => {
     switch (severity) {
@@ -176,62 +89,39 @@ export function AIAlertsManagement() {
     }
   }
 
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case "active":
-        return "bg-destructive text-destructive-foreground"
-      case "investigating":
-        return "bg-secondary text-secondary-foreground"
-      case "resolved":
-        return "bg-primary text-primary-foreground"
-      default:
-        return "bg-muted text-muted-foreground"
-    }
-  }
-
   const getTypeIcon = (type: string) => {
-    switch (type) {
+    switch (type.toLowerCase()) {
       case "garbage":
         return <Trash2 className="h-4 w-4" />
       case "spill":
         return <Droplets className="h-4 w-4" />
       case "vandalism":
-        return <AlertTriangle className="h-4 w-4" />
       default:
         return <AlertTriangle className="h-4 w-4" />
     }
   }
 
   const filteredAlerts = alerts.filter((alert) => {
+    const severity = mapAlertSeverity(alert.alert_type)
     const matchesSearch =
-      alert.id.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      alert.location.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      alert.description.toLowerCase().includes(searchTerm.toLowerCase())
-    const matchesSeverity = severityFilter === "all" || alert.severity === severityFilter
-    const matchesStatus = statusFilter === "all" || alert.status === statusFilter
-    const matchesType = typeFilter === "all" || alert.type === typeFilter
-    return matchesSearch && matchesSeverity && matchesStatus && matchesType
+      alert.bin_id.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      alert.alert_type.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (alert.description?.toLowerCase().includes(searchTerm.toLowerCase()) ?? false)
+    const matchesSeverity = severityFilter === "all" || severity === severityFilter
+    const matchesType = typeFilter === "all" || alert.alert_type.toLowerCase() === typeFilter.toLowerCase()
+    return matchesSearch && matchesSeverity && matchesType
   })
 
   const stats = {
     total: alerts.length,
-    active: alerts.filter((a) => a.status === "active").length,
-    investigating: alerts.filter((a) => a.status === "investigating").length,
-    resolved: alerts.filter((a) => a.status === "resolved").length,
-    high: alerts.filter((a) => a.severity === "high").length,
+    high: alerts.filter((a) => mapAlertSeverity(a.alert_type) === "high").length,
   }
 
-  const handleStatusChange = (alertId: string, newStatus: string) => {
-    setAlerts((prev) =>
-      prev.map((alert) =>
-        alert.id === alertId
-          ? {
-              ...alert,
-              status: newStatus,
-              resolvedAt: newStatus === "resolved" ? new Date().toISOString() : null,
-            }
-          : alert,
-      ),
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      </div>
     )
   }
 
@@ -240,7 +130,7 @@ export function AIAlertsManagement() {
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-3xl font-bold tracking-tight">AI Alerts & Detection</h2>
-          <p className="text-muted-foreground">Real-time AI-powered waste detection and monitoring alerts.</p>
+          <p className="text-muted-foreground">Real-time AI-powered waste detection and monitoring alerts</p>
         </div>
         <div className="flex items-center space-x-2">
           <Button
@@ -251,11 +141,15 @@ export function AIAlertsManagement() {
             <Activity className="h-4 w-4 mr-2" />
             {isRealTimeEnabled ? "Live" : "Paused"}
           </Button>
+          <Button onClick={fetchAlerts} variant="outline" size="sm">
+            <RefreshCw className="h-4 w-4 mr-2" />
+            Refresh
+          </Button>
         </div>
       </div>
 
       {/* Stats Cards */}
-      <div className="grid gap-4 md:grid-cols-5">
+      <div className="grid gap-4 md:grid-cols-3">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Total Alerts</CardTitle>
@@ -268,41 +162,21 @@ export function AIAlertsManagement() {
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Active</CardTitle>
-            <AlertTriangle className="h-4 w-4 text-destructive" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-destructive">{stats.active}</div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Investigating</CardTitle>
-            <Clock className="h-4 w-4 text-secondary" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-secondary">{stats.investigating}</div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Resolved</CardTitle>
-            <CheckCircle className="h-4 w-4 text-primary" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-primary">{stats.resolved}</div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">High Priority</CardTitle>
             <TrendingUp className="h-4 w-4 text-destructive" />
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold text-destructive">{stats.high}</div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Status</CardTitle>
+            <Activity className="h-4 w-4 text-primary" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-primary">Active</div>
           </CardContent>
         </Card>
       </div>
@@ -343,18 +217,6 @@ export function AIAlertsManagement() {
                   </SelectContent>
                 </Select>
 
-                <Select value={statusFilter} onValueChange={setStatusFilter}>
-                  <SelectTrigger className="w-36">
-                    <SelectValue placeholder="Status" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All Status</SelectItem>
-                    <SelectItem value="active">Active</SelectItem>
-                    <SelectItem value="investigating">Investigating</SelectItem>
-                    <SelectItem value="resolved">Resolved</SelectItem>
-                  </SelectContent>
-                </Select>
-
                 <Select value={typeFilter} onValueChange={setTypeFilter}>
                   <SelectTrigger className="w-32">
                     <SelectValue placeholder="Type" />
@@ -364,175 +226,63 @@ export function AIAlertsManagement() {
                     <SelectItem value="garbage">Garbage</SelectItem>
                     <SelectItem value="spill">Spill</SelectItem>
                     <SelectItem value="vandalism">Vandalism</SelectItem>
+                    <SelectItem value="fire">Fire</SelectItem>
+                    <SelectItem value="overflow">Overflow</SelectItem>
                   </SelectContent>
                 </Select>
-
-                <Button variant="outline" size="sm">
-                  <RefreshCw className="h-4 w-4 mr-2" />
-                  Refresh
-                </Button>
               </div>
             </div>
 
             <TabsContent value="feed">
-              <div className="space-y-4 max-h-[600px] overflow-y-auto">
-                {filteredAlerts.map((alert) => (
-                  <Card key={alert.id} className="transition-all hover:shadow-md">
-                    <CardContent className="p-4">
-                      <div className="flex items-start justify-between">
-                        <div className="flex items-start space-x-4">
-                          <div className="flex items-center justify-center w-10 h-10 rounded-full bg-muted">
-                            {getTypeIcon(alert.type)}
-                          </div>
-                          <div className="flex-1 space-y-2">
-                            <div className="flex items-center space-x-2">
-                              <h4 className="font-medium capitalize">{alert.type} Detection</h4>
-                              <Badge className={cn("text-xs", getSeverityColor(alert.severity))}>
-                                {alert.severity}
-                              </Badge>
-                              <Badge className={cn("text-xs", getStatusColor(alert.status))}>{alert.status}</Badge>
-                            </div>
-                            <p className="text-sm text-muted-foreground">{alert.description}</p>
-                            <div className="flex items-center space-x-4 text-sm text-muted-foreground">
-                              <div className="flex items-center">
-                                <Camera className="h-3 w-3 mr-1" />
-                                {alert.cameraId}
+              {filteredAlerts.length === 0 ? (
+                <div className="flex flex-col items-center justify-center h-64 text-muted-foreground">
+                  <CheckCircle className="h-16 w-16 mb-4" />
+                  <p className="text-lg font-medium">No alerts found</p>
+                  <p className="text-sm">All systems running smoothly</p>
+                </div>
+              ) : (
+                <div className="space-y-4 max-h-[600px] overflow-y-auto">
+                  {filteredAlerts.map((alert) => {
+                    const severity = mapAlertSeverity(alert.alert_type)
+                    return (
+                      <Card key={alert.id} className="transition-all hover:shadow-md">
+                        <CardContent className="p-4">
+                          <div className="flex items-start justify-between">
+                            <div className="flex items-start space-x-4">
+                              <div className="flex items-center justify-center w-10 h-10 rounded-full bg-muted">
+                                {getTypeIcon(alert.alert_type)}
                               </div>
-                              <div className="flex items-center">
-                                <MapPin className="h-3 w-3 mr-1" />
-                                {alert.location}
-                              </div>
-                              <div className="flex items-center">
-                                <Clock className="h-3 w-3 mr-1" />
-                                {alert.timestampRelative}
-                              </div>
-                              <div>Confidence: {alert.confidence}%</div>
-                            </div>
-                            {alert.assignedTo && (
-                              <div className="text-sm">
-                                <span className="text-muted-foreground">Assigned to:</span>{" "}
-                                <span className="font-medium">{alert.assignedTo}</span>
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                        <div className="flex items-center space-x-2">
-                          {alert.status === "active" && (
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => handleStatusChange(alert.id, "investigating")}
-                            >
-                              Investigate
-                            </Button>
-                          )}
-                          {alert.status === "investigating" && (
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => handleStatusChange(alert.id, "resolved")}
-                            >
-                              <CheckCircle className="h-3 w-3 mr-1" />
-                              Resolve
-                            </Button>
-                          )}
-                          <Dialog>
-                            <DialogTrigger asChild>
-                              <Button variant="ghost" size="sm" onClick={() => setSelectedAlert(alert)}>
-                                <Eye className="h-4 w-4" />
-                              </Button>
-                            </DialogTrigger>
-                            <DialogContent className="max-w-3xl">
-                              <DialogHeader>
-                                <DialogTitle>Alert Details - {selectedAlert?.id}</DialogTitle>
-                                <DialogDescription>
-                                  Detailed information about this AI detection alert
-                                </DialogDescription>
-                              </DialogHeader>
-                              {selectedAlert && (
-                                <div className="grid gap-4 py-4">
-                                  <div className="grid grid-cols-2 gap-4">
-                                    <div className="space-y-2">
-                                      <h4 className="font-medium">Detection Information</h4>
-                                      <div className="text-sm space-y-1">
-                                        <p>
-                                          <strong>Alert ID:</strong> {selectedAlert.id}
-                                        </p>
-                                        <p>
-                                          <strong>Type:</strong> {selectedAlert.type}
-                                        </p>
-                                        <p>
-                                          <strong>Confidence:</strong> {selectedAlert.confidence}%
-                                        </p>
-                                        <p>
-                                          <strong>Camera:</strong> {selectedAlert.cameraId}
-                                        </p>
-                                        <p>
-                                          <strong>Related Bin:</strong> {selectedAlert.binId}
-                                        </p>
-                                      </div>
-                                    </div>
-                                    <div className="space-y-2">
-                                      <h4 className="font-medium">Status & Assignment</h4>
-                                      <div className="text-sm space-y-1">
-                                        <p>
-                                          <strong>Status:</strong>
-                                          <Badge className={cn("ml-2 text-xs", getStatusColor(selectedAlert.status))}>
-                                            {selectedAlert.status}
-                                          </Badge>
-                                        </p>
-                                        <p>
-                                          <strong>Severity:</strong>
-                                          <Badge
-                                            className={cn("ml-2 text-xs", getSeverityColor(selectedAlert.severity))}
-                                          >
-                                            {selectedAlert.severity}
-                                          </Badge>
-                                        </p>
-                                        <p>
-                                          <strong>Assigned To:</strong> {selectedAlert.assignedTo || "Unassigned"}
-                                        </p>
-                                        <p>
-                                          <strong>Detected:</strong> {selectedAlert.timestampRelative}
-                                        </p>
-                                        {selectedAlert.resolvedAt && (
-                                          <p>
-                                            <strong>Resolved:</strong>{" "}
-                                            {new Date(selectedAlert.resolvedAt).toLocaleString()}
-                                          </p>
-                                        )}
-                                      </div>
-                                    </div>
-                                  </div>
-                                  <div className="space-y-2">
-                                    <h4 className="font-medium">Location & Description</h4>
-                                    <div className="text-sm space-y-1">
-                                      <p>
-                                        <strong>Location:</strong> {selectedAlert.location}
-                                      </p>
-                                      <p>
-                                        <strong>Description:</strong> {selectedAlert.description}
-                                      </p>
-                                    </div>
-                                  </div>
-                                  <div className="space-y-2">
-                                    <h4 className="font-medium">Detection Image</h4>
-                                    <img
-                                      src={selectedAlert.imageUrl || "/placeholder.svg"}
-                                      alt="Detection"
-                                      className="w-full h-48 object-cover rounded-md border"
-                                    />
-                                  </div>
+                              <div className="flex-1 space-y-2">
+                                <div className="flex items-center space-x-2">
+                                  <h4 className="font-medium capitalize">{alert.alert_type} Detection</h4>
+                                  <Badge className={cn("text-xs", getSeverityColor(severity))}>
+                                    {severity}
+                                  </Badge>
                                 </div>
-                              )}
-                            </DialogContent>
-                          </Dialog>
-                        </div>
-                      </div>
-                    </CardContent>
-                  </Card>
-                ))}
-              </div>
+                                <p className="text-sm text-muted-foreground">
+                                  {alert.description || `${alert.alert_type} detected at bin ${alert.bin_id}`}
+                                </p>
+                                <div className="flex items-center space-x-4 text-sm text-muted-foreground">
+                                  <div>Bin: {alert.bin_id}</div>
+                                  <div>{formatTimestamp(alert.timestamp)}</div>
+                                </div>
+                              </div>
+                            </div>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => handleDeleteAlert(alert.id)}
+                              className="text-destructive hover:text-destructive"
+                            >
+                              <X className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    )
+                  })}
+                </div>
+              )}
             </TabsContent>
 
             <TabsContent value="table">
@@ -542,69 +292,52 @@ export function AIAlertsManagement() {
                     <TableRow>
                       <TableHead>Alert ID</TableHead>
                       <TableHead>Type</TableHead>
-                      <TableHead>Location</TableHead>
+                      <TableHead>Bin ID</TableHead>
                       <TableHead>Severity</TableHead>
-                      <TableHead>Status</TableHead>
-                      <TableHead>Confidence</TableHead>
                       <TableHead>Time</TableHead>
                       <TableHead>Actions</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {filteredAlerts.map((alert) => (
-                      <TableRow key={alert.id}>
-                        <TableCell className="font-medium">{alert.id}</TableCell>
-                        <TableCell>
-                          <div className="flex items-center">
-                            {getTypeIcon(alert.type)}
-                            <span className="ml-2 capitalize">{alert.type}</span>
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          <div className="flex items-center">
-                            <MapPin className="h-3 w-3 mr-1 text-muted-foreground" />
-                            {alert.location}
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          <Badge className={cn("text-xs", getSeverityColor(alert.severity))}>{alert.severity}</Badge>
-                        </TableCell>
-                        <TableCell>
-                          <Badge className={cn("text-xs", getStatusColor(alert.status))}>{alert.status}</Badge>
-                        </TableCell>
-                        <TableCell>{alert.confidence}%</TableCell>
-                        <TableCell className="text-sm text-muted-foreground">{alert.timestampRelative}</TableCell>
-                        <TableCell>
-                          <div className="flex items-center space-x-1">
-                            {alert.status === "active" && (
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => handleStatusChange(alert.id, "investigating")}
-                              >
-                                Investigate
-                              </Button>
-                            )}
-                            {alert.status === "investigating" && (
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => handleStatusChange(alert.id, "resolved")}
-                              >
-                                <CheckCircle className="h-3 w-3" />
-                              </Button>
-                            )}
-                            <Dialog>
-                              <DialogTrigger asChild>
-                                <Button variant="ghost" size="sm" onClick={() => setSelectedAlert(alert)}>
-                                  <Eye className="h-4 w-4" />
-                                </Button>
-                              </DialogTrigger>
-                            </Dialog>
-                          </div>
+                    {filteredAlerts.length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={6} className="text-center text-muted-foreground">
+                          No alerts found
                         </TableCell>
                       </TableRow>
-                    ))}
+                    ) : (
+                      filteredAlerts.map((alert) => {
+                        const severity = mapAlertSeverity(alert.alert_type)
+                        return (
+                          <TableRow key={alert.id}>
+                            <TableCell className="font-medium">#{alert.id}</TableCell>
+                            <TableCell>
+                              <div className="flex items-center">
+                                {getTypeIcon(alert.alert_type)}
+                                <span className="ml-2 capitalize">{alert.alert_type}</span>
+                              </div>
+                            </TableCell>
+                            <TableCell>{alert.bin_id}</TableCell>
+                            <TableCell>
+                              <Badge className={cn("text-xs", getSeverityColor(severity))}>{severity}</Badge>
+                            </TableCell>
+                            <TableCell className="text-sm text-muted-foreground">
+                              {formatTimestamp(alert.timestamp)}
+                            </TableCell>
+                            <TableCell>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => handleDeleteAlert(alert.id)}
+                                className="text-destructive hover:text-destructive"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </TableCell>
+                          </TableRow>
+                        )
+                      })
+                    )}
                   </TableBody>
                 </Table>
               </div>

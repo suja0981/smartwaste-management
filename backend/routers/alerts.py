@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 
 from database import get_db, BinDB, AIAlertDB
 from models import AIAlertPayload, AIAlert
-from utils import get_current_timestamp, format_timestamp_response
+from utils import get_current_timestamp, format_timestamp_response, determine_bin_status
 
 router = APIRouter()
 

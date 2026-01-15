@@ -1,5 +1,4 @@
-from datetime import datetime
-
+from datetime import datetime, UTC
 def determine_bin_status(fill_level_percent: int) -> str:
     """
     Determine bin status based on fill level percentage.

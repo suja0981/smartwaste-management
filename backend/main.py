@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from database import engine, Base
-from routers import bins, telemetry, alerts
+from routers import bins, telemetry, alerts, stats  # Add stats
 
 # Create database tables
 Base.metadata.create_all(bind=engine)
@@ -26,6 +26,7 @@ app.add_middleware(
 app.include_router(bins.router, prefix="/bins", tags=["bins"])
 app.include_router(telemetry.router, prefix="/telemetry", tags=["telemetry"])
 app.include_router(alerts.router, prefix="/ai_alerts", tags=["alerts"])
+app.include_router(stats.router, prefix="/stats", tags=["stats"])  # Add this line
 
 @app.get("/health")
 def health_check():
@@ -36,5 +37,5 @@ def root():
     return {
         "name": "Smart Waste Management API",
         "version": app.version,
-        "endpoints": ["/health", "/bins", "/telemetry", "/ai_alerts"],
+        "endpoints": ["/health", "/bins", "/telemetry", "/ai_alerts", "/stats"],
     }

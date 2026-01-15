@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 
 from database import get_db, BinDB
 from models import TelemetryPayload
-from utils import determine_bin_status, get_current_timestamp, format_timestamp_response
+from utils import get_current_timestamp, format_timestamp_response, determine_bin_status
 
 router = APIRouter()
 

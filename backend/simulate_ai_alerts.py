@@ -3,7 +3,7 @@ import random
 import requests
 from datetime import datetime, UTC
 
-API_URL = "http://localhost:8000/ai_alert"
+API_URL = "http://localhost:8000/ai_alerts"
 BIN_IDS = ["bin1", "bin2", "bin3"]
 ALERT_TYPES = ["fire", "vandalism", "overflow"]
 

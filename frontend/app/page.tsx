@@ -1,7 +1,9 @@
-//Home dashboard page. Renders stats, bin status, and AI alerts sections.
-
 import { DashboardLayout } from "@/components/dashboard-layout"
-import { DashboardStats, BinStatusSection, AIAlertsSection } from "@/components/dashboard-widgets"
+import { 
+  DashboardStatsIntegrated, 
+  BinStatusSectionIntegrated, 
+  AIAlertsSectionIntegrated 
+} from "@/components/dashboard-widgets"
 
 export default function HomePage() {
   return (
@@ -14,11 +16,11 @@ export default function HomePage() {
           </p>
         </div>
 
-        <DashboardStats />
+        <DashboardStatsIntegrated />
 
         <div className="grid gap-6 lg:grid-cols-2">
-          <BinStatusSection />
-          <AIAlertsSection />
+          <BinStatusSectionIntegrated />
+          <AIAlertsSectionIntegrated />
         </div>
       </div>
     </DashboardLayout>
