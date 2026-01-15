@@ -29,6 +29,39 @@ class AIAlertDB(Base):
     description = Column(Text, nullable=True)
     timestamp = Column(DateTime)
 
+class CrewDB(Base):
+    __tablename__ = "crews"
+    id = Column(String, primary_key=True, index=True)
+    name = Column(String)
+    leader = Column(String)
+    members_count = Column(Integer, default=3)
+    status = Column(String, default="available")  # available, active, break, offline
+    phone = Column(String, nullable=True)
+    email = Column(String, nullable=True)
+    current_location = Column(String, nullable=True)
+    created_at = Column(DateTime)
+    
+    # Relationship to tasks
+    tasks = relationship("TaskDB", back_populates="crew")
+
+class TaskDB(Base):
+    __tablename__ = "tasks"
+    id = Column(String, primary_key=True, index=True)
+    title = Column(String)
+    description = Column(Text, nullable=True)
+    priority = Column(String)  # high, medium, low
+    status = Column(String)  # pending, in-progress, completed
+    bin_id = Column(String, nullable=True)
+    location = Column(String)
+    estimated_time_minutes = Column(Integer, nullable=True)
+    crew_id = Column(String, ForeignKey("crews.id"), nullable=True)
+    alert_id = Column(Integer, nullable=True)
+    created_at = Column(DateTime)
+    due_date = Column(DateTime, nullable=True)
+    completed_at = Column(DateTime, nullable=True)
+    
+    # Relationship to crew
+    crew = relationship("CrewDB", back_populates="tasks")
 # Dependency to get database session
 def get_db():
     db = SessionLocal()

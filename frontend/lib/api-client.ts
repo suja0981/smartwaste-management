@@ -181,3 +181,159 @@ export async function sendTelemetry(
 export async function healthCheck(): Promise<{ status: string; service: string }> {
   return fetchAPI('/health')
 }
+
+// Add to existing api-client.ts
+
+// ============================================
+// CREWS API
+// ============================================
+
+export interface Crew {
+  id: string
+  name: string
+  leader: string
+  members_count: number
+  status: string
+  phone?: string
+  email?: string
+  current_location?: string
+  created_at: string
+}
+
+export async function getCrews(): Promise<Crew[]> {
+  return fetchAPI<Crew[]>('/crews')
+}
+
+export async function getCrew(id: string): Promise<Crew> {
+  return fetchAPI<Crew>(`/crews/${id}`)
+}
+
+export interface CreateCrewRequest {
+  id: string
+  name: string
+  leader: string
+  members_count?: number
+  phone?: string
+  email?: string
+}
+
+export async function createCrew(data: CreateCrewRequest): Promise<Crew> {
+  return fetchAPI<Crew>('/crews', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  })
+}
+
+export interface UpdateCrewRequest {
+  name?: string
+  leader?: string
+  members_count?: number
+  status?: string
+  phone?: string
+  email?: string
+  current_location?: string
+}
+
+export async function updateCrew(
+  id: string,
+  data: UpdateCrewRequest
+): Promise<Crew> {
+  return fetchAPI<Crew>(`/crews/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify(data),
+  })
+}
+
+export async function deleteCrew(id: string): Promise<void> {
+  return fetchAPI<void>(`/crews/${id}`, {
+    method: 'DELETE',
+  })
+}
+
+export async function getCrewTasks(id: string): Promise<Task[]> {
+  return fetchAPI<Task[]>(`/crews/${id}/tasks`)
+}
+
+// ============================================
+// TASKS API
+// ============================================
+
+export interface Task {
+  id: string
+  title: string
+  description?: string
+  priority: string
+  status: string
+  bin_id?: string
+  location: string
+  estimated_time_minutes?: number
+  crew_id?: string
+  alert_id?: number
+  created_at: string
+  due_date?: string
+  completed_at?: string
+}
+
+export async function getTasks(): Promise<Task[]> {
+  return fetchAPI<Task[]>('/tasks')
+}
+
+export async function getTask(id: string): Promise<Task> {
+  return fetchAPI<Task>(`/tasks/${id}`)
+}
+
+export interface CreateTaskRequest {
+  id: string
+  title: string
+  description?: string
+  priority?: string
+  location: string
+  bin_id?: string
+  estimated_time_minutes?: number
+  alert_id?: number
+  due_date?: string
+}
+
+export async function createTask(data: CreateTaskRequest): Promise<Task> {
+  return fetchAPI<Task>('/tasks', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  })
+}
+
+export interface UpdateTaskRequest {
+  title?: string
+  description?: string
+  priority?: string
+  status?: string
+  location?: string
+  crew_id?: string
+  estimated_time_minutes?: number
+  completed_at?: string
+}
+
+export async function updateTask(
+  id: string,
+  data: UpdateTaskRequest
+): Promise<Task> {
+  return fetchAPI<Task>(`/tasks/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify(data),
+  })
+}
+
+export async function assignTask(
+  id: string,
+  crew_id: string
+): Promise<Task> {
+  return fetchAPI<Task>(`/tasks/${id}/assign`, {
+    method: 'POST',
+    body: JSON.stringify({ crew_id }),
+  })
+}
+
+export async function deleteTask(id: string): Promise<void> {
+  return fetchAPI<void>(`/tasks/${id}`, {
+    method: 'DELETE',
+  })
+}

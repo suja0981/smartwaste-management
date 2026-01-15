@@ -44,3 +44,71 @@ class AIAlert(BaseModel):
     alert_type: str
     description: Optional[str] = None
     timestamp: datetime
+
+    class Crew(BaseModel):
+    id: str
+    name: str
+    leader: str
+    members_count: int
+    status: str
+    phone: Optional[str] = None
+    email: Optional[str] = None
+    current_location: Optional[str] = None
+    created_at: datetime
+
+class CreateCrewRequest(BaseModel):
+    id: str
+    name: str
+    leader: str
+    members_count: int = 3
+    phone: Optional[str] = None
+    email: Optional[str] = None
+
+class UpdateCrewRequest(BaseModel):
+    name: Optional[str] = None
+    leader: Optional[str] = None
+    members_count: Optional[int] = None
+    status: Optional[str] = None
+    phone: Optional[str] = None
+    email: Optional[str] = None
+    current_location: Optional[str] = None
+
+# NEW: Task Models
+class Task(BaseModel):
+    id: str
+    title: str
+    description: Optional[str] = None
+    priority: str
+    status: str
+    bin_id: Optional[str] = None
+    location: str
+    estimated_time_minutes: Optional[int] = None
+    crew_id: Optional[str] = None
+    alert_id: Optional[int] = None
+    created_at: datetime
+    due_date: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+
+class CreateTaskRequest(BaseModel):
+    id: str
+    title: str
+    description: Optional[str] = None
+    priority: str = "medium"
+    location: str
+    bin_id: Optional[str] = None
+    estimated_time_minutes: Optional[int] = 30
+    alert_id: Optional[int] = None
+    due_date: Optional[datetime] = None
+
+class UpdateTaskRequest(BaseModel):
+    title: Optional[str] = None
+    description: Optional[str] = None
+    priority: Optional[str] = None
+    status: Optional[str] = None
+    location: Optional[str] = None
+    crew_id: Optional[str] = None
+    estimated_time_minutes: Optional[int] = None
+    completed_at: Optional[datetime] = None
+
+class AssignTaskRequest(BaseModel):
+    crew_id: str
