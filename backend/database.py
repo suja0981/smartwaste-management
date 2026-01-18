@@ -1,7 +1,6 @@
-from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, Text
+from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, Text, ForeignKey
 from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker
-
+from sqlalchemy.orm import sessionmaker, relationship
 # SQLite setup
 DATABASE_URL = "sqlite:///./smart_waste.db"
 engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})

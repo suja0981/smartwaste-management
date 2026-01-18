@@ -1,11 +1,8 @@
-//Main dashboard layout, navigation, sidebar, and header.
-
 "use client"
 
 import type React from "react"
-
 import { useState } from "react"
-import { Bell, Menu, Settings, User, Trash2, BarChart3, Users, AlertTriangle, MapPin, Home } from "lucide-react"
+import { Bell, Menu, Settings, User, Trash2, BarChart3, Users, AlertTriangle, MapPin, Home, Sparkles } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Sheet, SheetContent } from "@/components/ui/sheet"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
@@ -19,10 +16,9 @@ const navigation = [
   { name: "Dashboard", href: "/", icon: Home },
   { name: "Bins", href: "/bins", icon: Trash2 },
   { name: "AI Alerts", href: "/alerts", icon: AlertTriangle },
-  { name: "Reports & Analytics", href: "/reports", icon: BarChart3 },
-  { name: "Crew Management", href: "/crew", icon: Users },
-  { name: "Map View", href: "/map", icon: MapPin },
-  { name: "Settings", href: "/settings", icon: Settings },
+  { name: "Reports", href: "/reports", icon: BarChart3 },
+  { name: "Crew", href: "/crew", icon: Users },
+  { name: "Map", href: "/map", icon: MapPin },
 ]
 
 interface DashboardLayoutProps {
@@ -34,14 +30,23 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
   const pathname = usePathname()
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50 dark:from-slate-950 dark:via-slate-900 dark:to-slate-950">
+      {/* Background Pattern */}
+      <div className="fixed inset-0 bg-[url('/grid.svg')] opacity-[0.02] pointer-events-none"></div>
+      
       {/* Mobile sidebar */}
       <Sheet open={sidebarOpen} onOpenChange={setSidebarOpen}>
-        <SheetContent side="left" className="w-64 p-0">
-          <div className="flex h-full flex-col">
-            <div className="flex h-16 items-center px-6 border-b">
-              <Trash2 className="h-8 w-8 text-primary" />
-              <span className="ml-2 text-lg font-semibold">Smart Waste</span>
+        <SheetContent side="left" className="w-64 p-0 border-0">
+          <div className="flex h-full flex-col bg-gradient-to-b from-white to-slate-50 dark:from-slate-900 dark:to-slate-950">
+            <div className="flex h-16 items-center px-6 border-b border-slate-200 dark:border-slate-800">
+              <div className="flex items-center gap-2">
+                <div className="p-2 bg-gradient-to-br from-cyan-500 to-blue-600 rounded-xl">
+                  <Trash2 className="h-5 w-5 text-white" />
+                </div>
+                <span className="text-lg font-bold bg-gradient-to-r from-cyan-600 to-blue-600 bg-clip-text text-transparent">
+                  SmartWaste
+                </span>
+              </div>
             </div>
             <nav className="flex-1 space-y-1 px-3 py-4">
               {navigation.map((item) => (
@@ -50,9 +55,9 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
                   href={item.href}
                   className={cn(
                     pathname === item.href
-                      ? "bg-primary text-primary-foreground"
-                      : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
-                    "group flex items-center px-3 py-2 text-sm font-medium rounded-md transition-colors",
+                      ? "bg-gradient-to-r from-cyan-500 to-blue-600 text-white shadow-lg"
+                      : "text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800",
+                    "group flex items-center px-3 py-2.5 text-sm font-medium rounded-xl transition-all duration-200"
                   )}
                 >
                   <item.icon className="mr-3 h-5 w-5" />
@@ -66,10 +71,16 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
 
       {/* Desktop sidebar */}
       <div className="hidden lg:fixed lg:inset-y-0 lg:flex lg:w-64 lg:flex-col">
-        <div className="flex flex-col flex-grow bg-sidebar border-r border-sidebar-border">
-          <div className="flex h-16 items-center px-6 border-b border-sidebar-border">
-            <Trash2 className="h-8 w-8 text-sidebar-primary" />
-            <span className="ml-2 text-lg font-semibold text-sidebar-foreground">Smart Waste</span>
+        <div className="flex flex-col flex-grow bg-white/80 dark:bg-slate-900/80 backdrop-blur-xl border-r border-slate-200 dark:border-slate-800 shadow-xl">
+          <div className="flex h-16 items-center px-6 border-b border-slate-200 dark:border-slate-800">
+            <div className="flex items-center gap-2">
+              <div className="p-2 bg-gradient-to-br from-cyan-500 to-blue-600 rounded-xl shadow-lg">
+                <Trash2 className="h-5 w-5 text-white" />
+              </div>
+              <span className="text-lg font-bold bg-gradient-to-r from-cyan-600 to-blue-600 bg-clip-text text-transparent">
+                SmartWaste
+              </span>
+            </div>
           </div>
           <nav className="flex-1 space-y-1 px-3 py-4">
             {navigation.map((item) => (
@@ -78,23 +89,37 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
                 href={item.href}
                 className={cn(
                   pathname === item.href
-                    ? "bg-sidebar-primary text-sidebar-primary-foreground"
-                    : "text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
-                  "group flex items-center px-3 py-2 text-sm font-medium rounded-md transition-colors",
+                    ? "bg-gradient-to-r from-cyan-500 to-blue-600 text-white shadow-lg scale-[1.02]"
+                    : "text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800",
+                  "group flex items-center px-3 py-2.5 text-sm font-medium rounded-xl transition-all duration-200"
                 )}
               >
                 <item.icon className="mr-3 h-5 w-5" />
                 {item.name}
+                {pathname === item.href && item.name === "AI Alerts" && (
+                  <Badge className="ml-auto bg-white/20 text-white border-0">Live</Badge>
+                )}
               </a>
             ))}
           </nav>
+          
+          {/* Bottom section */}
+          <div className="p-4 border-t border-slate-200 dark:border-slate-800">
+            <div className="flex items-center gap-3 px-3 py-2 rounded-xl bg-gradient-to-r from-emerald-50 to-teal-50 dark:from-emerald-900/20 dark:to-teal-900/20 border border-emerald-200 dark:border-emerald-800">
+              <Sparkles className="h-5 w-5 text-emerald-600 dark:text-emerald-400" />
+              <div className="flex-1 min-w-0">
+                <p className="text-xs font-medium text-emerald-900 dark:text-emerald-100">System Status</p>
+                <p className="text-xs text-emerald-600 dark:text-emerald-400">All systems operational</p>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
 
       {/* Main content */}
       <div className="lg:pl-64">
         {/* Top navigation */}
-        <div className="sticky top-0 z-40 flex h-16 items-center gap-x-4 border-b bg-background px-4 shadow-sm sm:gap-x-6 sm:px-6 lg:px-8">
+        <div className="sticky top-0 z-40 flex h-16 items-center gap-x-4 border-b border-slate-200 dark:border-slate-800 bg-white/80 dark:bg-slate-900/80 backdrop-blur-xl px-4 shadow-sm sm:gap-x-6 sm:px-6 lg:px-8">
           <Button variant="ghost" size="sm" className="lg:hidden" onClick={() => setSidebarOpen(true)}>
             <Menu className="h-5 w-5" />
           </Button>
@@ -111,16 +136,20 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
               {/* Notifications */}
               <Button variant="ghost" size="sm" className="relative">
                 <Bell className="h-5 w-5" />
-                <Badge className="absolute -top-1 -right-1 h-5 w-5 rounded-full p-0 text-xs bg-secondary">3</Badge>
+                <Badge className="absolute -top-1 -right-1 h-5 w-5 rounded-full p-0 text-xs bg-gradient-to-r from-orange-500 to-pink-600 border-0">
+                  3
+                </Badge>
               </Button>
 
               {/* Profile dropdown */}
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <Button variant="ghost" className="relative h-8 w-8 rounded-full">
-                    <Avatar className="h-8 w-8">
+                  <Button variant="ghost" className="relative h-9 w-9 rounded-full">
+                    <Avatar className="h-9 w-9 border-2 border-gradient-to-r from-cyan-500 to-blue-600">
                       <AvatarImage src="/avatars/01.png" alt="Admin" />
-                      <AvatarFallback>AD</AvatarFallback>
+                      <AvatarFallback className="bg-gradient-to-br from-cyan-500 to-blue-600 text-white">
+                        AD
+                      </AvatarFallback>
                     </Avatar>
                   </Button>
                 </DropdownMenuTrigger>
@@ -140,7 +169,7 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
         </div>
 
         {/* Page content */}
-        <main className="py-6">
+        <main className="py-8 relative z-10">
           <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">{children}</div>
         </main>
       </div>

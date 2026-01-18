@@ -45,7 +45,8 @@ class AIAlert(BaseModel):
     description: Optional[str] = None
     timestamp: datetime
 
-    class Crew(BaseModel):
+# Crew models
+class Crew(BaseModel):
     id: str
     name: str
     leader: str
@@ -73,7 +74,7 @@ class UpdateCrewRequest(BaseModel):
     email: Optional[str] = None
     current_location: Optional[str] = None
 
-# NEW: Task Models
+# Task Models
 class Task(BaseModel):
     id: str
     title: str
