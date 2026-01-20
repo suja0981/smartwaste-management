@@ -1,6 +1,7 @@
-from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, Text, ForeignKey
+from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, Text, ForeignKey, JSON
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
+
 # SQLite setup
 DATABASE_URL = "sqlite:///./smart_waste.db"
 engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
@@ -12,6 +13,8 @@ class BinDB(Base):
     __tablename__ = "bins"
     id = Column(String, primary_key=True, index=True)
     location = Column(String)
+    latitude = Column(Float, nullable=True)  # NEW: for route optimization
+    longitude = Column(Float, nullable=True)  # NEW: for route optimization
     capacity_liters = Column(Integer)
     fill_level_percent = Column(Integer)
     status = Column(String)
@@ -38,10 +41,13 @@ class CrewDB(Base):
     phone = Column(String, nullable=True)
     email = Column(String, nullable=True)
     current_location = Column(String, nullable=True)
+    current_latitude = Column(Float, nullable=True)  # NEW: for route optimization
+    current_longitude = Column(Float, nullable=True)  # NEW: for route optimization
     created_at = Column(DateTime)
     
-    # Relationship to tasks
+    # Relationship to tasks and routes
     tasks = relationship("TaskDB", back_populates="crew")
+    routes = relationship("RouteDB", back_populates="crew")
 
 class TaskDB(Base):
     __tablename__ = "tasks"
@@ -61,6 +67,39 @@ class TaskDB(Base):
     
     # Relationship to crew
     crew = relationship("CrewDB", back_populates="tasks")
+
+class RouteDB(Base):
+    """NEW: Stores optimized collection routes"""
+    __tablename__ = "routes"
+    id = Column(String, primary_key=True, index=True)
+    crew_id = Column(String, ForeignKey("crews.id"), nullable=True)
+    status = Column(String, default="planned")  # planned, active, completed, cancelled
+    algorithm_used = Column(String)  # greedy, priority, hybrid, two_opt
+    total_distance_km = Column(Float)
+    estimated_time_minutes = Column(Float)
+    actual_time_minutes = Column(Float, nullable=True)
+    bin_ids = Column(JSON)  # List of bin IDs in order
+    waypoints = Column(JSON)  # List of {bin_id, lat, lon, fill_level, order}
+    created_at = Column(DateTime)
+    started_at = Column(DateTime, nullable=True)
+    completed_at = Column(DateTime, nullable=True)
+    
+    # Relationship to crew
+    crew = relationship("CrewDB", back_populates="routes")
+
+class RouteHistoryDB(Base):
+    """NEW: Stores historical route performance data for analytics"""
+    __tablename__ = "route_history"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    route_id = Column(String, ForeignKey("routes.id"))
+    crew_id = Column(String)
+    bins_collected = Column(Integer)
+    total_distance_km = Column(Float)
+    total_time_minutes = Column(Float)
+    fuel_efficiency_score = Column(Float, nullable=True)  # distance/bins ratio
+    completion_date = Column(DateTime)
+    notes = Column(Text, nullable=True)
+
 # Dependency to get database session
 def get_db():
     db = SessionLocal()

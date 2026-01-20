@@ -17,7 +17,9 @@ def list_bins(db: Session = Depends(get_db)):
         location=b.location,
         capacity_liters=b.capacity_liters,
         fill_level_percent=b.fill_level_percent,
-        status=b.status
+        status=b.status,
+        latitude=b.latitude,
+        longitude=b.longitude
     ) for b in bins]
 
 @router.post("/", response_model=Bin, status_code=201)
@@ -34,7 +36,9 @@ def create_bin(req: CreateBinRequest, db: Session = Depends(get_db)):
         location=req.location,
         capacity_liters=req.capacity_liters,
         fill_level_percent=req.fill_level_percent,
-        status=status
+        status=status,
+        latitude=req.latitude,
+        longitude=req.longitude
     )
     db.add(bin_db)
     db.commit()
@@ -45,7 +49,9 @@ def create_bin(req: CreateBinRequest, db: Session = Depends(get_db)):
         location=bin_db.location,
         capacity_liters=bin_db.capacity_liters,
         fill_level_percent=bin_db.fill_level_percent,
-        status=bin_db.status
+        status=bin_db.status,
+        latitude=bin_db.latitude,
+        longitude=bin_db.longitude
     )
 
 @router.get("/{bin_id}", response_model=Bin)
@@ -60,7 +66,9 @@ def get_bin(bin_id: str, db: Session = Depends(get_db)):
         location=bin_db.location,
         capacity_liters=bin_db.capacity_liters,
         fill_level_percent=bin_db.fill_level_percent,
-        status=bin_db.status
+        status=bin_db.status,
+        latitude=bin_db.latitude,
+        longitude=bin_db.longitude
     )
 
 @router.patch("/{bin_id}", response_model=Bin)
@@ -84,6 +92,12 @@ def update_bin(bin_id: str, req: UpdateBinRequest, db: Session = Depends(get_db)
         if req.status in {"ok", "offline", "maintenance", "full"}:
             bin_db.status = req.status
     
+    # Update latitude/longitude if provided
+    if req.latitude is not None:
+        bin_db.latitude = req.latitude
+    if req.longitude is not None:
+        bin_db.longitude = req.longitude
+    
     db.commit()
     db.refresh(bin_db)
     
@@ -92,7 +106,9 @@ def update_bin(bin_id: str, req: UpdateBinRequest, db: Session = Depends(get_db)
         location=bin_db.location,
         capacity_liters=bin_db.capacity_liters,
         fill_level_percent=bin_db.fill_level_percent,
-        status=bin_db.status
+        status=bin_db.status,
+        latitude=bin_db.latitude,
+        longitude=bin_db.longitude
     )
 
 @router.delete("/{bin_id}", status_code=204)

@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Optional, List, Dict
 from datetime import datetime
 from pydantic import BaseModel, Field
 
@@ -9,18 +9,24 @@ class Bin(BaseModel):
     capacity_liters: int = Field(ge=1, description="Bin capacity in liters")
     fill_level_percent: int = Field(ge=0, le=100, description="Current fill level percentage")
     status: str = Field(default="ok", description="Operational status: ok, full, offline, maintenance")
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
 
 class CreateBinRequest(BaseModel):
     id: str
     location: str
     capacity_liters: int
     fill_level_percent: int = 0
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
 
 class UpdateBinRequest(BaseModel):
     location: Optional[str] = None
     capacity_liters: Optional[int] = Field(default=None, ge=1)
     fill_level_percent: Optional[int] = Field(default=None, ge=0, le=100)
     status: Optional[str] = None
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
 
 # Telemetry models
 class TelemetryPayload(BaseModel):
@@ -55,6 +61,8 @@ class Crew(BaseModel):
     phone: Optional[str] = None
     email: Optional[str] = None
     current_location: Optional[str] = None
+    current_latitude: Optional[float] = None
+    current_longitude: Optional[float] = None
     created_at: datetime
 
 class CreateCrewRequest(BaseModel):
@@ -64,6 +72,8 @@ class CreateCrewRequest(BaseModel):
     members_count: int = 3
     phone: Optional[str] = None
     email: Optional[str] = None
+    current_latitude: Optional[float] = None
+    current_longitude: Optional[float] = None
 
 class UpdateCrewRequest(BaseModel):
     name: Optional[str] = None
@@ -73,6 +83,8 @@ class UpdateCrewRequest(BaseModel):
     phone: Optional[str] = None
     email: Optional[str] = None
     current_location: Optional[str] = None
+    current_latitude: Optional[float] = None
+    current_longitude: Optional[float] = None
 
 # Task Models
 class Task(BaseModel):
@@ -113,3 +125,64 @@ class UpdateTaskRequest(BaseModel):
 
 class AssignTaskRequest(BaseModel):
     crew_id: str
+
+# Route Models (NEW)
+class RouteWaypoint(BaseModel):
+    """Represents a single waypoint in a route"""
+    bin_id: str
+    latitude: float
+    longitude: float
+    fill_level: int
+    order: int
+    estimated_collection_time: int = 10  # minutes
+
+class Route(BaseModel):
+    """Complete route information"""
+    id: str
+    crew_id: Optional[str] = None
+    status: str
+    algorithm_used: str
+    total_distance_km: float
+    estimated_time_minutes: float
+    actual_time_minutes: Optional[float] = None
+    bin_ids: List[str]
+    waypoints: List[Dict]  # List of waypoint dictionaries
+    created_at: datetime
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+
+class OptimizeRouteRequest(BaseModel):
+    """Request to optimize a route"""
+    bin_ids: List[str] = Field(description="List of bin IDs to include in route")
+    crew_id: Optional[str] = Field(default=None, description="Crew ID for route assignment")
+    start_latitude: Optional[float] = Field(default=None, description="Starting latitude (crew location)")
+    start_longitude: Optional[float] = Field(default=None, description="Starting longitude (crew location)")
+    algorithm: str = Field(default="hybrid", description="Algorithm: greedy, priority, hybrid, two_opt")
+    save_route: bool = Field(default=False, description="Whether to save the route to database")
+
+class RouteOptimizationResult(BaseModel):
+    """Result of route optimization"""
+    route_id: Optional[str] = None
+    algorithm: str
+    total_distance_km: float
+    estimated_time_minutes: float
+    bin_count: int
+    waypoints: List[Dict]
+    efficiency_score: float  # bins per km
+
+class CompareRoutesRequest(BaseModel):
+    """Request to compare multiple routing algorithms"""
+    bin_ids: List[str]
+    start_latitude: Optional[float] = None
+    start_longitude: Optional[float] = None
+
+class RouteComparison(BaseModel):
+    """Comparison of multiple algorithms"""
+    algorithms: List[RouteOptimizationResult]
+    recommended: str  # Which algorithm is recommended
+
+class UpdateRouteStatusRequest(BaseModel):
+    """Update route status"""
+    status: str  # planned, active, completed, cancelled
+    actual_time_minutes: Optional[float] = None
+    notes: Optional[str] = None

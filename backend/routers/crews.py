@@ -21,6 +21,8 @@ def list_crews(db: Session = Depends(get_db)):
         phone=c.phone,
         email=c.email,
         current_location=c.current_location,
+        current_latitude=c.current_latitude,
+        current_longitude=c.current_longitude,
         created_at=c.created_at
     ) for c in crews]
 
@@ -39,6 +41,8 @@ def create_crew(req: CreateCrewRequest, db: Session = Depends(get_db)):
         status="available",
         phone=req.phone,
         email=req.email,
+        current_latitude=req.current_latitude,
+        current_longitude=req.current_longitude,
         created_at=get_current_timestamp()
     )
     db.add(crew_db)
@@ -54,6 +58,8 @@ def create_crew(req: CreateCrewRequest, db: Session = Depends(get_db)):
         phone=crew_db.phone,
         email=crew_db.email,
         current_location=crew_db.current_location,
+        current_latitude=crew_db.current_latitude,
+        current_longitude=crew_db.current_longitude,
         created_at=crew_db.created_at
     )
 
@@ -73,6 +79,8 @@ def get_crew(crew_id: str, db: Session = Depends(get_db)):
         phone=crew_db.phone,
         email=crew_db.email,
         current_location=crew_db.current_location,
+        current_latitude=crew_db.current_latitude,
+        current_longitude=crew_db.current_longitude,
         created_at=crew_db.created_at
     )
 
@@ -97,6 +105,10 @@ def update_crew(crew_id: str, req: UpdateCrewRequest, db: Session = Depends(get_
         crew_db.email = req.email
     if req.current_location is not None:
         crew_db.current_location = req.current_location
+    if req.current_latitude is not None:
+        crew_db.current_latitude = req.current_latitude
+    if req.current_longitude is not None:
+        crew_db.current_longitude = req.current_longitude
     
     db.commit()
     db.refresh(crew_db)
@@ -110,6 +122,8 @@ def update_crew(crew_id: str, req: UpdateCrewRequest, db: Session = Depends(get_
         phone=crew_db.phone,
         email=crew_db.email,
         current_location=crew_db.current_location,
+        current_latitude=crew_db.current_latitude,
+        current_longitude=crew_db.current_longitude,
         created_at=crew_db.created_at
     )
 
