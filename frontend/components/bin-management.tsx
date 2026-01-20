@@ -23,6 +23,10 @@ import {
   Loader2,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { AddBinDialog } from "./add-bin-dialog"
+import { EditBinDialog } from "./edit-bin-dialog"
+import { DeleteBinDialog } from "./delete-bin-dialog"
+
 
 export function BinManagementIntegrated() {
   const [bins, setBins] = useState<Bin[]>([])
@@ -79,16 +83,28 @@ export function BinManagementIntegrated() {
   }
 
   return (
+
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-3xl font-bold tracking-tight">Bin Management</h2>
-          <p className="text-muted-foreground">Real-time monitoring of waste collection bins</p>
+          <p className="text-muted-foreground">
+            Real-time monitoring of waste collection bins
+          </p>
         </div>
-        <Button onClick={fetchBins} variant="outline" size="sm" disabled={loading}>
-          <RefreshCw className={cn("h-4 w-4 mr-2", loading && "animate-spin")} />
-          Refresh
-        </Button>
+
+        <div className="flex gap-2">
+          <AddBinDialog onSuccess={fetchBins} />
+
+          <Button
+            onClick={fetchBins}
+            variant="outline"
+            size="sm"
+            disabled={loading}
+          >
+            Refresh
+          </Button>
+        </div>
       </div>
 
       {/* Stats Cards */}
@@ -205,6 +221,9 @@ export function BinManagementIntegrated() {
                       </div>
                     )}
                   </div>
+
+                  <EditBinDialog bin={bin} onSuccess={fetchBins} />
+                  <DeleteBinDialog bin={bin} onSuccess={fetchBins} />
                 </div>
               )
             })}
