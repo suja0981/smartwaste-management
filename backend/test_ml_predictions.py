@@ -269,7 +269,7 @@ def main():
         if response.status_code != 200:
             print_error("Backend server is not responding!")
             return
-    except:
+    except Exception as e:
         print_error("Cannot connect to backend server!")
         print_info(f"Make sure the server is running at {API_BASE}")
         return

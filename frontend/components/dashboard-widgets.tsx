@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button"
 import { useToast } from "@/hooks/use-toast"
 import { getBins, getAlerts, type Bin, type AIAlert } from "@/lib/api-client"
 import { mapBinStatus, getStatusColor, getStatusText, formatTimestamp, mapAlertSeverity } from "@/lib/status-mapper"
-import { Trash2, AlertTriangle, CheckCircle, Battery, Thermometer, Droplets, MapPin, Loader2 } from "lucide-react"
+import { Trash2,AlertTriangle, CheckCircle, Battery, Thermometer, Droplets, MapPin, Loader2 } from "lucide-react"
 import { cn } from "@/lib/utils"
 
 export function DashboardStatsIntegrated() {

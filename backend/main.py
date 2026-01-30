@@ -2,7 +2,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from database import engine, Base
-from routers import bins, telemetry, alerts, stats, crews, tasks, routes, predictions
+from routers import bins, telemetry_update, alerts, stats, crews, tasks, routes, auth
+# from routers import predictions  # Commented out - requires numpy/sklearn  
 
 # Create database tables
 Base.metadata.create_all(bind=engine)
@@ -13,24 +14,32 @@ app = FastAPI(
     version="3.0.0"
 )
 
-# CORS middleware
+# CORS middleware - Restrict to specific origins
+CORS_ORIGINS = [
+    "http://localhost:3000",
+    "http://localhost:8080",
+    "http://127.0.0.1:3000",
+    "http://127.0.0.1:8080",
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=CORS_ORIGINS,
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH"],
     allow_headers=["*"],
 )
 
 # Include routers
+app.include_router(auth.router, prefix="/auth", tags=["authentication"])
 app.include_router(bins.router, prefix="/bins", tags=["bins"])
-app.include_router(telemetry.router, prefix="/telemetry", tags=["telemetry"])
+app.include_router(telemetry_update.router, prefix="/telemetry", tags=["telemetry"])
 app.include_router(alerts.router, prefix="/ai_alerts", tags=["alerts"])
 app.include_router(stats.router, prefix="/stats", tags=["stats"])
 app.include_router(crews.router, prefix="/crews", tags=["crews"])
 app.include_router(tasks.router, prefix="/tasks", tags=["tasks"])
 app.include_router(routes.router, prefix="/routes", tags=["routes"])
-app.include_router(predictions.router, prefix="/predictions", tags=["predictions"])  # NEW
+# app.include_router(predictions.router, prefix="/predictions", tags=["predictions"])  # Commented out until numpy is installed
 
 @app.get("/health")
 def health_check():
@@ -42,6 +51,7 @@ def root():
         "name": "Smart Waste Management API",
         "version": app.version,
         "features": [
+            "User Authentication & Authorization",
             "IoT Sensor Integration",
             "AI-Powered CCTV Alerts",
             "Crew & Task Management",
@@ -52,6 +62,7 @@ def root():
         ],
         "endpoints": [
             "/health", 
+            "/auth",
             "/bins", 
             "/telemetry", 
             "/ai_alerts", 

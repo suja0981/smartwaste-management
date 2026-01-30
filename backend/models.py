@@ -1,6 +1,47 @@
 from typing import Optional, List, Dict
 from datetime import datetime
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, EmailStr
+
+# ============================================
+# Authentication & Authorization Models
+# ============================================
+
+class UserRole(str):
+    ADMIN = "admin"
+    USER = "user"
+
+class UserRegister(BaseModel):
+    email: EmailStr
+    password: str = Field(min_length=8, description="Password must be at least 8 characters")
+    full_name: str
+
+class UserLogin(BaseModel):
+    email: EmailStr
+    password: str
+
+class User(BaseModel):
+    id: int
+    email: str
+    full_name: str
+    role: str  # "admin" or "user"
+    is_active: bool
+    created_at: datetime
+
+class UserResponse(BaseModel):
+    id: int
+    email: str
+    full_name: str
+    role: str
+    is_active: bool
+
+class TokenResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    user: UserResponse
+
+class TokenData(BaseModel):
+    email: Optional[str] = None
+    role: Optional[str] = None
 
 # Bin models
 class Bin(BaseModel):

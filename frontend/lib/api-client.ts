@@ -14,18 +14,26 @@ export class ApiError extends Error {
   }
 }
 
+// Get auth token from localStorage
+function getAuthToken(): string | null {
+  if (typeof window === 'undefined') return null
+  return localStorage.getItem('authToken')
+}
+
 // Generic fetch wrapper with error handling
 async function fetchAPI<T>(
   endpoint: string,
   options?: RequestInit
 ): Promise<T> {
   const url = `${API_URL}${endpoint}`
-  
+  const token = getAuthToken()
+
   try {
     const response = await fetch(url, {
       ...options,
       headers: {
         'Content-Type': 'application/json',
+        ...(token && { Authorization: `Bearer ${token}` }),
         ...options?.headers,
       },
     })
@@ -47,6 +55,70 @@ async function fetchAPI<T>(
       0
     )
   }
+}
+
+// ============================================
+// AUTHENTICATION API
+// ============================================
+
+export interface AuthUser {
+  id: number
+  email: string
+  full_name: string
+  role: 'admin' | 'user'
+  is_active: boolean
+}
+
+export interface AuthResponse {
+  access_token: string
+  token_type: string
+  user: AuthUser
+}
+
+export interface LoginRequest {
+  email: string
+  password: string
+}
+
+export interface SignupRequest {
+  email: string
+  password: string
+  full_name: string
+}
+
+export async function login(credentials: LoginRequest): Promise<AuthResponse> {
+  return fetchAPI<AuthResponse>('/auth/login', {
+    method: 'POST',
+    body: JSON.stringify(credentials),
+  })
+}
+
+export async function signup(data: SignupRequest): Promise<AuthResponse> {
+  return fetchAPI<AuthResponse>('/auth/signup', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  })
+}
+
+export async function getCurrentUser(): Promise<AuthUser> {
+  const token = getAuthToken()
+  if (!token) {
+    throw new ApiError('No auth token found', 401)
+  }
+
+  return fetch(`${API_URL}/auth/me`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  })
+    .then(res => res.json())
+    .catch(err => {
+      throw new ApiError('Failed to fetch user', 0)
+    })
+}
+
+export async function logout(): Promise<void> {
+  localStorage.removeItem('authToken')
 }
 
 // ============================================
@@ -336,4 +408,259 @@ export async function deleteTask(id: string): Promise<void> {
   return fetchAPI<void>(`/tasks/${id}`, {
     method: 'DELETE',
   })
+}
+// Add these types and functions to your existing api-client.ts
+
+// ============================================
+// ML PREDICTIONS API
+// ============================================
+
+export interface FillPrediction {
+  bin_id: string
+  current_fill: number
+  fill_rate_per_hour?: number
+  hours_until_full?: number
+  predicted_full_time?: string
+  confidence?: number
+  data_points_used?: number
+}
+
+export interface Anomaly {
+  metric: string
+  current_value: number
+  expected_range: [number, number]
+  z_score: number
+  severity: 'high' | 'medium' | 'low'
+}
+
+export interface CollectionRecommendation {
+  bin_id: string
+  current_fill: number
+  should_collect: boolean
+  urgency: 'high' | 'medium' | 'low'
+  reason: string
+  recommended_time: string
+  prediction?: FillPrediction
+}
+
+export interface BinAnalysis {
+  bin_id: string
+  current_fill: number
+  prediction: FillPrediction | null
+  anomalies: Anomaly[]
+  collection_recommendation: CollectionRecommendation
+  usage_pattern: Record<string, number>
+  analysis_timestamp: string
+}
+
+export interface PredictedAlert {
+  bin_id: string
+  location: string
+  current_fill: number
+  hours_until_full: number
+  predicted_time: string
+  urgency: 'high' | 'medium' | 'low'
+}
+
+export interface MLStats {
+  service: string
+  status: string
+  statistics: {
+    total_bins_tracked: number
+    total_data_points: number
+    bins_with_predictions: number
+    prediction_coverage: number
+  }
+  models: {
+    fill_predictor: string
+    anomaly_detector: string
+    collection_optimizer: string
+  }
+}
+
+// Get fill time prediction for a bin
+export async function getPrediction(binId: string): Promise<FillPrediction> {
+  return fetchAPI<FillPrediction>(`/predictions/predict/${binId}`)
+}
+
+// Get comprehensive analysis for a bin
+export async function analyzeBin(binId: string): Promise<BinAnalysis> {
+  return fetchAPI<BinAnalysis>(`/predictions/analyze/${binId}`)
+}
+
+// Get anomalies for a bin
+export async function getAnomalies(binId: string): Promise<Anomaly[]> {
+  return fetchAPI<Anomaly[]>(`/predictions/anomalies/${binId}`)
+}
+
+// Get collection recommendation
+export async function getCollectionRecommendation(binId: string): Promise<CollectionRecommendation> {
+  return fetchAPI<CollectionRecommendation>(`/predictions/collection/recommend/${binId}`)
+}
+
+// Get optimized collection order for all bins
+export async function getOptimizedCollectionOrder(): Promise<string[]> {
+  return fetchAPI<string[]>('/predictions/collection/optimize')
+}
+
+// Get usage pattern for a bin
+export async function getUsagePattern(binId: string): Promise<{
+  bin_id: string
+  hourly_fill_rates: Record<string, number>
+  peak_hours: Array<[string, number]>
+}> {
+  return fetchAPI(`/predictions/patterns/${binId}`)
+}
+
+// Get all predictions
+export async function getAllPredictions(): Promise<{
+  total_bins: number
+  predictions_available: number
+  predictions: FillPrediction[]
+}> {
+  return fetchAPI('/predictions/predictions/all')
+}
+
+// Get predicted alerts
+export async function getPredictedAlerts(hoursAhead: number = 24): Promise<{
+  timeframe_hours: number
+  alerts_count: number
+  alerts: PredictedAlert[]
+}> {
+  return fetchAPI(`/predictions/alerts/predicted?hours_ahead=${hoursAhead}`)
+}
+
+// Get ML service stats
+export async function getMLStats(): Promise<MLStats> {
+  return fetchAPI<MLStats>('/predictions/stats')
+}
+
+// ============================================
+// ROUTES API
+// ============================================
+
+export interface RouteWaypoint {
+  bin_id: string
+  latitude: number
+  longitude: number
+  fill_level: number
+  order: number
+  estimated_collection_time: number
+}
+
+export interface Route {
+  id?: string
+  route_id?: string
+  algorithm: string
+  total_distance_km: number
+  estimated_time_minutes: number
+  bin_count: number
+  waypoints: RouteWaypoint[]
+  efficiency_score: number
+  crew_id?: string
+  status?: string
+  created_at?: string
+}
+
+export interface OptimizeRouteRequest {
+  bin_ids: string[]
+  crew_id?: string
+  start_latitude?: number
+  start_longitude?: number
+  algorithm?: 'greedy' | 'priority' | 'hybrid' | 'two_opt'
+  save_route?: boolean
+}
+
+export interface RouteComparison {
+  algorithms: Route[]
+  recommended: string
+}
+
+export interface RouteAnalytics {
+  total_routes_completed: number
+  total_bins_collected: number
+  total_distance_km: number
+  average_efficiency: number
+  average_time_minutes: number
+}
+
+// Optimize a route
+export async function optimizeRoute(request: OptimizeRouteRequest): Promise<Route> {
+  return fetchAPI<Route>('/routes/optimize', {
+    method: 'POST',
+    body: JSON.stringify(request),
+  })
+}
+
+// Compare routing algorithms
+export async function compareRoutes(binIds: string[], startLat?: number, startLon?: number): Promise<RouteComparison> {
+  return fetchAPI<RouteComparison>('/routes/compare', {
+    method: 'POST',
+    body: JSON.stringify({
+      bin_ids: binIds,
+      start_latitude: startLat,
+      start_longitude: startLon,
+    }),
+  })
+}
+
+// Get all routes
+export async function getRoutes(status?: string, crewId?: string): Promise<Route[]> {
+  const params = new URLSearchParams()
+  if (status) params.append('status', status)
+  if (crewId) params.append('crew_id', crewId)
+
+  const query = params.toString()
+  return fetchAPI<any[]>(`/routes${query ? '?' + query : ''}`)
+    .then(routes => routes.map(r => ({
+      ...r,
+      route_id: r.id,
+      waypoints: typeof r.waypoints === 'string' ? JSON.parse(r.waypoints) : r.waypoints,
+      bin_ids: typeof r.bin_ids === 'string' ? JSON.parse(r.bin_ids) : r.bin_ids,
+    })))
+}
+
+// Get specific route
+export async function getRoute(routeId: string): Promise<Route> {
+  return fetchAPI<any>(`/routes/${routeId}`)
+    .then(r => ({
+      ...r,
+      route_id: r.id,
+      waypoints: typeof r.waypoints === 'string' ? JSON.parse(r.waypoints) : r.waypoints,
+      bin_ids: typeof r.bin_ids === 'string' ? JSON.parse(r.bin_ids) : r.bin_ids,
+    }))
+}
+
+// Update route status
+export async function updateRouteStatus(
+  routeId: string,
+  status: string,
+  actualTimeMinutes?: number,
+  notes?: string
+): Promise<Route> {
+  return fetchAPI<any>(`/routes/${routeId}/status`, {
+    method: 'PATCH',
+    body: JSON.stringify({
+      status,
+      actual_time_minutes: actualTimeMinutes,
+      notes,
+    }),
+  }).then(r => ({
+    ...r,
+    route_id: r.id,
+    waypoints: typeof r.waypoints === 'string' ? JSON.parse(r.waypoints) : r.waypoints,
+    bin_ids: typeof r.bin_ids === 'string' ? JSON.parse(r.bin_ids) : r.bin_ids,
+  }))
+}
+
+// Delete route
+export async function deleteRoute(routeId: string): Promise<void> {
+  return fetchAPI<void>(`/routes/${routeId}`, {
+    method: 'DELETE',
+  })
+}
+
+// Get route analytics
+export async function getRouteAnalytics(): Promise<RouteAnalytics> {
+  return fetchAPI<RouteAnalytics>('/routes/analytics/performance')
 }
