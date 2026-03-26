@@ -7,12 +7,15 @@ from jose import JWTError, jwt
 from passlib.context import CryptContext
 from database import SessionLocal, UserDB, get_db
 from models import UserRegister, UserLogin, TokenResponse, UserResponse
-import os
+from config import get_settings
 
-# Security config - Load from environment
-SECRET_KEY = os.getenv("SECRET_KEY", "your-secret-key-change-this-in-production")
-ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 30
+# Get settings
+settings = get_settings()
+
+# Security config - Load from environment settings
+SECRET_KEY = settings.secret_key
+ALGORITHM = settings.algorithm
+ACCESS_TOKEN_EXPIRE_MINUTES = settings.access_token_expire_minutes
 security = HTTPBearer()
 
 # Password hashing

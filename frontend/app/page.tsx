@@ -4,8 +4,7 @@ import { DashboardLayout } from "@/components/dashboard-layout"
 import { ProtectedRoute } from "@/components/protected-route"
 import {
   ModernDashboardStats,
-  ModernBinStatus,
-  ModernAIAlerts
+  ModernBinStatus
 } from "@/components/modern-dashboard-widgets"
 import { MLPredictionsCard, PredictedAlertsCard, MLStatsCard } from "@/components/ml-prediction-widgets"
 
@@ -51,7 +50,6 @@ export default function HomePage() {
           {/* Main Content Grid */}
           <div className="grid gap-6 lg:grid-cols-2">
             <ModernBinStatus />
-            <ModernAIAlerts />
           </div>
 
           {/* Quick Actions */}

@@ -1,29 +1,18 @@
 "use client"
 
-import { useState, useEffect } from "react"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { useToast } from "@/hooks/use-toast"
-import { getAlerts, deleteAlert, type AIAlert } from "@/lib/api-client"
-import { mapAlertSeverity, formatTimestamp } from "@/lib/status-mapper"
-import {
-  Search,
-  AlertTriangle,
-  Trash2,
-  Droplets,
-  RefreshCw,
-  CheckCircle,
-  TrendingUp,
-  Activity,
-  Loader2,
-  X,
-} from "lucide-react"
-import { cn } from "@/lib/utils"
+// AI alert management feature is removed; this file is now a placeholder.
+
+export function AIAlertsManagementIntegrated() {
+  return (
+    <div className="p-12">
+      <h1 className="text-2xl font-bold">AI Alerts Management Disabled</h1>
+      <p className="mt-3 text-muted-foreground">
+        The dedicated AI alerts management dashboard has been removed.
+        Please rely on the main dashboard and prediction widgets for insights.
+      </p>
+    </div>
+  )
+}
 
 export function AIAlertsManagementIntegrated() {
   const [alerts, setAlerts] = useState<AIAlert[]>([])

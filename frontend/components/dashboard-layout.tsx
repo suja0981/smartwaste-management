@@ -2,7 +2,7 @@
 
 import type React from "react"
 import { useState } from "react"
-import { Bell, Menu, Settings, User, Trash2, BarChart3, Users, AlertTriangle, MapPin, Home, Sparkles, LogOut, Shield } from "lucide-react"
+import { Bell, Menu, Settings, User, Trash2, BarChart3, Users, AlertTriangle, MapPin, Home, Sparkles, LogOut, Shield, Brain } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Sheet, SheetContent } from "@/components/ui/sheet"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from "@/components/ui/dropdown-menu"
@@ -18,7 +18,7 @@ import { useAuth } from "@/contexts/auth-context"
 const navigation = [
   { name: "Dashboard", href: "/", icon: Home },
   { name: "Bins", href: "/bins", icon: Trash2 },
-  { name: "AI Alerts", href: "/alerts", icon: AlertTriangle },
+  { name: "Predictions", href: "/predictions", icon: Brain },
   { name: "Routes", href: "/routes", icon: Route },
   { name: "Reports", href: "/reports", icon: BarChart3 },
   { name: "Crew", href: "/crew", icon: Users },
@@ -117,9 +117,6 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
               >
                 <item.icon className="mr-3 h-5 w-5" />
                 {item.name}
-                {pathname === item.href && item.name === "AI Alerts" && (
-                  <Badge className="ml-auto bg-white/20 text-white border-0">Live</Badge>
-                )}
               </a>
             ))}
           </nav>

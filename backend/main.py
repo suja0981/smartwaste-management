@@ -2,29 +2,36 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from database import engine, Base
-from routers import bins, telemetry_update, alerts, stats, crews, tasks, routes, auth
-# from routers import predictions  # Commented out - requires numpy/sklearn  
+from routers import bins, telemetry_update, alerts, stats, crews, tasks, routes, auth, predictions
+from config import get_settings
+from security import add_security_to_app
+
+# Load configuration
+settings = get_settings()
 
 # Create database tables
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI(
-    title="Smart Waste Management API",
-    description="AI-Powered CCTV Monitoring, IoT Sensors, Route Optimization & ML Predictions",
-    version="3.0.0"
+    title=settings.api_title,
+    description=settings.api_description,
+    version=settings.api_version,
+    docs_url="/docs" if not settings.is_production() else None,
+    redoc_url="/redoc" if not settings.is_production() else None,
+    openapi_url="/openapi.json" if not settings.is_production() else None,
 )
 
-# CORS middleware - Restrict to specific origins
-CORS_ORIGINS = [
-    "http://localhost:3000",
-    "http://localhost:8080",
-    "http://127.0.0.1:3000",
-    "http://127.0.0.1:8080",
-]
+# Add security middleware
+add_security_to_app(
+    app,
+    enable_rate_limiting=not settings.is_production(),
+    requests_per_minute=100
+)
 
+# CORS middleware - Use settings to configure allowed origins
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=CORS_ORIGINS,
+    allow_origins=settings.cors_origins_list,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH"],
     allow_headers=["*"],
@@ -39,17 +46,23 @@ app.include_router(stats.router, prefix="/stats", tags=["stats"])
 app.include_router(crews.router, prefix="/crews", tags=["crews"])
 app.include_router(tasks.router, prefix="/tasks", tags=["tasks"])
 app.include_router(routes.router, prefix="/routes", tags=["routes"])
-# app.include_router(predictions.router, prefix="/predictions", tags=["predictions"])  # Commented out until numpy is installed
+app.include_router(predictions.router, prefix="/predictions", tags=["predictions"])
 
 @app.get("/health")
 def health_check():
-    return {"status": "ok", "service": "smart-waste-backend"}
+    return {
+        "status": "ok",
+        "service": "smart-waste-backend",
+        "environment": settings.environment,
+        "version": settings.api_version
+    }
 
 @app.get("/")
 def root():
     return {
-        "name": "Smart Waste Management API",
-        "version": app.version,
+        "name": settings.api_title,
+        "version": settings.api_version,
+        "environment": settings.environment,
         "features": [
             "User Authentication & Authorization",
             "IoT Sensor Integration",
@@ -72,4 +85,6 @@ def root():
             "/routes",
             "/predictions"
         ],
+        "docs": "/docs",
+        "openapi": "/openapi.json"
     }
