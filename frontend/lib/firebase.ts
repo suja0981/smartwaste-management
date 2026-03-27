@@ -20,13 +20,13 @@ import {
 } from "firebase/auth";
 
 const firebaseConfig = {
-    apiKey: "AIzaSyB58m0qujzRKLmoLUupV31urPbc0rMCHX8",
-    authDomain: "sgm-project-fc254.firebaseapp.com",
-  projectId: "sgm-project-fc254",
-  storageBucket: "sgm-project-fc254.firebasestorage.app",
-  messagingSenderId: "589768864478",
-  appId: "1:589768864478:web:b8293c62152d91d89f084f",
-  measurementId: "G-5YWNJWRTKD"// optional
+    apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
+    authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
+    projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
+    storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
+    messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
+    appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
+    measurementId: process.env.NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID
 };
 console.log("API KEY:", firebaseConfig.apiKey);
 // Prevent duplicate initialisation during Next.js hot-reload
