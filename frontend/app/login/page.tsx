@@ -1,134 +1,244 @@
-'use client'
+'use client';
 
-import React, { useState } from 'react'
-import Link from 'next/link'
-import { useRouter } from 'next/navigation'
-import { useAuth } from '@/contexts/auth-context'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Card } from '@/components/ui/card'
-import { AlertCircle } from 'lucide-react'
+/**
+ * app/login/page.tsx — Phase 2 login page.
+ *
+ * Three sign-in paths:
+ *   1. Google Sign-In (Firebase popup)
+ *   2. Email + Password (Firebase)
+ *   3. Local login link (for legacy admin accounts)
+ */
+
+import { useState } from "react";
+import { useRouter } from "next/navigation";
+import { useAuth } from "@/contexts/auth-context";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+    Card,
+    CardContent,
+    CardDescription,
+    CardHeader,
+    CardTitle,
+} from "@/components/ui/card";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+
+// Google "G" SVG icon (no external image dependency)
+function GoogleIcon() {
+    return (
+        <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+            <path
+                d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.796 2.716v2.259h2.908c1.702-1.567 2.684-3.875 2.684-6.615z"
+                fill="#4285F4"
+            />
+            <path
+                d="M9 18c2.43 0 4.467-.806 5.956-2.18l-2.908-2.259c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332A8.997 8.997 0 0 0 9 18z"
+                fill="#34A853"
+            />
+            <path
+                d="M3.964 10.71A5.41 5.41 0 0 1 3.682 9c0-.593.102-1.17.282-1.71V4.958H.957A8.996 8.996 0 0 0 0 9c0 1.452.348 2.827.957 4.042l3.007-2.332z"
+                fill="#FBBC05"
+            />
+            <path
+                d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0A8.997 8.997 0 0 0 .957 4.958L3.964 7.29C4.672 5.163 6.656 3.58 9 3.58z"
+                fill="#EA4335"
+            />
+        </svg>
+    );
+}
 
 export default function LoginPage() {
-    const [email, setEmail] = useState('')
-    const [password, setPassword] = useState('')
-    const [error, setError] = useState('')
-    const [isLoading, setIsLoading] = useState(false)
-    const router = useRouter()
-    const { login, isAuthenticated } = useAuth()
+    const { loginWithGoogle, loginWithEmail, loginLocal } = useAuth();
+    const router = useRouter();
 
-    if (isAuthenticated) {
-        router.push('/')
-        return null
-    }
+    const [email, setEmail] = useState("");
+    const [password, setPassword] = useState("");
+    const [error, setError] = useState("");
+    const [isLoading, setIsLoading] = useState(false);
+    const [showLocalLogin, setShowLocalLogin] = useState(false);
 
-    async function handleSubmit(e: React.FormEvent) {
-        e.preventDefault()
-        setError('')
-        setIsLoading(true)
-
-        try {
-            await login(email, password)
-            router.push('/')
-        } catch (err) {
-            setError(err instanceof Error ? err.message : 'Login failed. Please try again.')
-        } finally {
-            setIsLoading(false)
+    const handleError = (err: unknown) => {
+        const msg = err instanceof Error ? err.message : "Sign in failed";
+        // Make Firebase error codes human-readable
+        if (msg.includes("auth/wrong-password") || msg.includes("auth/user-not-found")) {
+            setError("Invalid email or password.");
+        } else if (msg.includes("auth/too-many-requests")) {
+            setError("Too many attempts. Please try again later.");
+        } else if (msg.includes("auth/popup-closed-by-user")) {
+            setError(""); // user cancelled — don't show an error
+        } else {
+            setError(msg);
         }
-    }
+    };
+
+    const onGoogleSignIn = async () => {
+        setError("");
+        setIsLoading(true);
+        try {
+            await loginWithGoogle();
+            router.push("/");
+        } catch (err) {
+            handleError(err);
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
+    const onEmailSignIn = async (e: React.FormEvent) => {
+        e.preventDefault();
+        setError("");
+        setIsLoading(true);
+        try {
+            await loginWithEmail(email, password);
+            router.push("/");
+        } catch (err) {
+            handleError(err);
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
+    const onLocalSignIn = async (e: React.FormEvent) => {
+        e.preventDefault();
+        setError("");
+        setIsLoading(true);
+        try {
+            await loginLocal(email, password);
+            router.push("/");
+        } catch (err) {
+            handleError(err);
+        } finally {
+            setIsLoading(false);
+        }
+    };
 
     return (
-        <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-50 p-4">
-            {/* Background decoration */}
-            <div className="absolute inset-0 overflow-hidden pointer-events-none">
-                <div className="absolute top-0 right-0 w-96 h-96 bg-blue-200 rounded-full mix-blend-multiply filter blur-3xl opacity-30 animate-pulse"></div>
-                <div className="absolute bottom-0 left-0 w-96 h-96 bg-purple-200 rounded-full mix-blend-multiply filter blur-3xl opacity-30 animate-pulse" style={{ animationDelay: '2s' }}></div>
-            </div>
-
-            <div className="relative z-10 w-full max-w-md">
-                <div className="text-center mb-8">
-                    <h1 className="text-4xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-blue-600 to-purple-600 mb-2">
-                        Waste Management
-                    </h1>
-                    <p className="text-gray-600">AI-Powered Smart Waste Collection</p>
-                </div>
-
-                <Card className="p-8 shadow-2xl border-0 bg-white/95 backdrop-blur">
-                    <h2 className="text-2xl font-bold mb-2 text-gray-900">Welcome Back</h2>
-                    <p className="text-gray-600 mb-6">Sign in to your account</p>
-
-                    {error && (
-                        <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg flex items-start gap-3">
-                            <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
-                            <p className="text-red-700 text-sm">{error}</p>
+        <div className="min-h-screen flex items-center justify-center bg-background px-4">
+            <Card className="w-full max-w-md">
+                <CardHeader className="space-y-1 text-center">
+                    <div className="flex justify-center mb-2">
+                        {/* Replace with your logo if you have one */}
+                        <div className="w-10 h-10 rounded-full bg-primary flex items-center justify-center text-primary-foreground font-bold text-lg">
+                            W
                         </div>
+                    </div>
+                    <CardTitle className="text-2xl">Smart Waste Management</CardTitle>
+                    <CardDescription>Sign in to your account</CardDescription>
+                </CardHeader>
+
+                <CardContent className="space-y-4">
+                    {error && (
+                        <Alert variant="destructive">
+                            <AlertDescription>{error}</AlertDescription>
+                        </Alert>
                     )}
 
-                    <form onSubmit={handleSubmit} className="space-y-5">
-                        <div>
-                            <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-2">
-                                Email Address
-                            </label>
-                            <Input
-                                id="email"
-                                type="email"
-                                placeholder="you@example.com"
-                                value={email}
-                                onChange={(e) => setEmail(e.target.value)}
-                                required
-                                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                                disabled={isLoading}
-                            />
-                        </div>
+                    {/* Google Sign-In */}
+                    <Button
+                        variant="outline"
+                        className="w-full"
+                        onClick={onGoogleSignIn}
+                        disabled={isLoading}
+                    >
+                        <GoogleIcon />
+                        <span className="ml-2">Continue with Google</span>
+                    </Button>
 
-                        <div>
-                            <label htmlFor="password" className="block text-sm font-medium text-gray-700 mb-2">
-                                Password
-                            </label>
-                            <Input
-                                id="password"
-                                type="password"
-                                placeholder="••••••••"
-                                value={password}
-                                onChange={(e) => setPassword(e.target.value)}
-                                required
-                                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                                disabled={isLoading}
-                            />
+                    <div className="relative">
+                        <div className="absolute inset-0 flex items-center">
+                            <span className="w-full border-t" />
                         </div>
+                        <div className="relative flex justify-center text-xs uppercase">
+                            <span className="bg-background px-2 text-muted-foreground">or</span>
+                        </div>
+                    </div>
 
-                        <Button
-                            type="submit"
-                            disabled={isLoading}
-                            className="w-full py-2 px-4 bg-gradient-to-r from-blue-600 to-purple-600 text-white font-semibold rounded-lg hover:from-blue-700 hover:to-purple-700 transition disabled:opacity-50"
+                    {/* Email + Password (Firebase) */}
+                    {!showLocalLogin && (
+                        <form onSubmit={onEmailSignIn} className="space-y-3">
+                            <div className="space-y-1">
+                                <Label htmlFor="email">Email</Label>
+                                <Input
+                                    id="email"
+                                    type="email"
+                                    placeholder="admin@example.com"
+                                    value={email}
+                                    onChange={(e) => setEmail(e.target.value)}
+                                    required
+                                />
+                            </div>
+                            <div className="space-y-1">
+                                <Label htmlFor="password">Password</Label>
+                                <Input
+                                    id="password"
+                                    type="password"
+                                    placeholder="••••••••"
+                                    value={password}
+                                    onChange={(e) => setPassword(e.target.value)}
+                                    required
+                                />
+                            </div>
+                            <Button type="submit" className="w-full" disabled={isLoading}>
+                                {isLoading ? "Signing in…" : "Sign in"}
+                            </Button>
+                        </form>
+                    )}
+
+                    {/* Legacy local login (for admin accounts pre-Firebase) */}
+                    {showLocalLogin && (
+                        <form onSubmit={onLocalSignIn} className="space-y-3">
+                            <Alert>
+                                <AlertDescription className="text-xs">
+                                    Local login — for admin accounts created before Firebase was enabled.
+                                </AlertDescription>
+                            </Alert>
+                            <div className="space-y-1">
+                                <Label htmlFor="local-email">Email</Label>
+                                <Input
+                                    id="local-email"
+                                    type="email"
+                                    value={email}
+                                    onChange={(e) => setEmail(e.target.value)}
+                                    required
+                                />
+                            </div>
+                            <div className="space-y-1">
+                                <Label htmlFor="local-password">Password</Label>
+                                <Input
+                                    id="local-password"
+                                    type="password"
+                                    value={password}
+                                    onChange={(e) => setPassword(e.target.value)}
+                                    required
+                                />
+                            </div>
+                            <Button type="submit" className="w-full" disabled={isLoading}>
+                                {isLoading ? "Signing in…" : "Sign in (local)"}
+                            </Button>
+                        </form>
+                    )}
+
+                    <div className="flex items-center justify-between text-xs text-muted-foreground">
+                        <button
+                            type="button"
+                            className="underline hover:text-foreground transition-colors"
+                            onClick={() => {
+                                setShowLocalLogin((v) => !v);
+                                setError("");
+                            }}
                         >
-                            {isLoading ? 'Signing in...' : 'Sign In'}
-                        </Button>
-                    </form>
-
-                    <div className="mt-6 pt-6 border-t border-gray-200">
-                        <p className="text-center text-gray-600 text-sm">
-                            Don't have an account?{' '}
-                            <Link href="/signup" className="text-blue-600 hover:text-blue-700 font-medium">
-                                Sign Up
-                            </Link>
-                        </p>
+                            {showLocalLogin ? "Use Firebase sign-in" : "Admin / local login"}
+                        </button>
+                        <a
+                            href="/signup"
+                            className="underline hover:text-foreground transition-colors"
+                        >
+                            Create account
+                        </a>
                     </div>
-
-                    {/* Demo credentials info */}
-                    <div className="mt-6 p-4 bg-blue-50 rounded-lg border border-blue-200">
-                        <p className="text-xs font-semibold text-blue-900 mb-2">Demo Credentials:</p>
-                        <div className="space-y-1 text-xs text-blue-800">
-                            <p><strong>Admin:</strong> admin@example.com / password123</p>
-                            <p><strong>User:</strong> user@example.com / password123</p>
-                        </div>
-                    </div>
-                </Card>
-
-                <p className="text-center text-gray-600 text-sm mt-6">
-                    By signing in, you agree to our Terms of Service and Privacy Policy
-                </p>
-            </div>
+                </CardContent>
+            </Card>
         </div>
-    )
+    );
 }

@@ -1,30 +1,23 @@
-"use client"
-
 import { useEffect, useState } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Progress } from "@/components/ui/progress"
 import { Button } from "@/components/ui/button"
 import { useToast } from "@/hooks/use-toast"
-import { getBins, getAlerts, type Bin, type AIAlert } from "@/lib/api-client"
-import { mapBinStatus, getStatusColor, getStatusText, formatTimestamp, mapAlertSeverity } from "@/lib/status-mapper"
+import { getBins, type Bin } from "@/lib/api-client"
+import { mapBinStatus, getStatusColor, getStatusText, formatTimestamp } from "@/lib/status-mapper"
 import { Trash2,AlertTriangle, CheckCircle, Battery, Thermometer, Droplets, MapPin, Loader2 } from "lucide-react"
 import { cn } from "@/lib/utils"
 
 export function DashboardStatsIntegrated() {
   const [bins, setBins] = useState<Bin[]>([])
-  const [alerts, setAlerts] = useState<AIAlert[]>([])
   const [loading, setLoading] = useState(true)
   const { toast } = useToast()
 
   const fetchData = async () => {
     try {
-      const [binsData, alertsData] = await Promise.all([
-        getBins(),
-        getAlerts()
-      ])
+      const binsData = await getBins()
       setBins(binsData)
-      setAlerts(alertsData)
       setLoading(false)
     } catch (error) {
       toast({
@@ -46,7 +39,6 @@ export function DashboardStatsIntegrated() {
     totalBins: bins.length,
     binsOnline: bins.filter(b => b.status !== 'offline').length,
     binsFull: bins.filter(b => mapBinStatus(b.status) === 'critical').length,
-    activeAlerts: alerts.length,
   }
 
   if (loading) {
@@ -90,17 +82,6 @@ export function DashboardStatsIntegrated() {
           <p className="text-xs text-muted-foreground">
             {stats.totalBins > 0 ? Math.round((stats.binsFull / stats.totalBins) * 100) : 0}% of total capacity
           </p>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-          <CardTitle className="text-sm font-medium">Active AI Alerts</CardTitle>
-          <AlertTriangle className="h-4 w-4 text-destructive" />
-        </CardHeader>
-        <CardContent>
-          <div className="text-2xl font-bold">{stats.activeAlerts}</div>
-          <p className="text-xs text-muted-foreground">Requires immediate attention</p>
         </CardContent>
       </Card>
 
@@ -228,133 +209,6 @@ export function BinStatusSectionIntegrated() {
         <div className="mt-4 flex justify-end">
           <Button variant="outline" size="sm" asChild>
             <a href="/bins">View All Bins</a>
-          </Button>
-        </div>
-      </CardContent>
-    </Card>
-  )
-}
-
-export function AIAlertsSectionIntegrated() {
-  const [alerts, setAlerts] = useState<AIAlert[]>([])
-  const [loading, setLoading] = useState(true)
-  const { toast } = useToast()
-
-  const fetchAlerts = async () => {
-    try {
-      const data = await getAlerts()
-      // Show only first 3 alerts for dashboard
-      setAlerts(data.slice(0, 3))
-      setLoading(false)
-    } catch (error) {
-      toast({
-        title: "Error",
-        description: error instanceof Error ? error.message : "Failed to load alerts",
-        variant: "destructive",
-      })
-      setLoading(false)
-    }
-  }
-
-  useEffect(() => {
-    fetchAlerts()
-    const interval = setInterval(fetchAlerts, 5000)
-    return () => clearInterval(interval)
-  }, [])
-
-  const getSeverityColor = (severity: string) => {
-    switch (severity) {
-      case "high":
-        return "bg-destructive text-destructive-foreground"
-      case "medium":
-        return "bg-secondary text-secondary-foreground"
-      case "low":
-        return "bg-muted text-muted-foreground"
-      default:
-        return "bg-muted text-muted-foreground"
-    }
-  }
-
-  const getTypeIcon = (type: string) => {
-    switch (type.toLowerCase()) {
-      case "garbage":
-        return <Trash2 className="h-4 w-4" />
-      case "spill":
-        return <Droplets className="h-4 w-4" />
-      default:
-        return <AlertTriangle className="h-4 w-4" />
-    }
-  }
-
-  if (loading) {
-    return (
-      <Card>
-        <CardHeader>
-          <CardTitle>AI Alerts Feed</CardTitle>
-          <CardDescription>Loading real-time alerts...</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="flex items-center justify-center h-32">
-            <Loader2 className="h-8 w-8 animate-spin text-primary" />
-          </div>
-        </CardContent>
-      </Card>
-    )
-  }
-
-  if (alerts.length === 0) {
-    return (
-      <Card>
-        <CardHeader>
-          <CardTitle>AI Alerts Feed</CardTitle>
-          <CardDescription>Real-time AI-powered waste detection alerts</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="flex flex-col items-center justify-center h-32 text-muted-foreground">
-            <CheckCircle className="h-12 w-12 mb-2" />
-            <p className="text-sm">No active alerts</p>
-          </div>
-        </CardContent>
-      </Card>
-    )
-  }
-
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle>AI Alerts Feed</CardTitle>
-        <CardDescription>Real-time AI-powered waste detection alerts</CardDescription>
-      </CardHeader>
-      <CardContent>
-        <div className="space-y-3 max-h-96 overflow-y-auto">
-          {alerts.map((alert) => {
-            const severity = mapAlertSeverity(alert.alert_type)
-            return (
-              <div key={alert.id} className="flex items-center justify-between p-3 border rounded-lg">
-                <div className="flex items-center space-x-3">
-                  <div className="flex items-center justify-center w-8 h-8 rounded-full bg-muted">
-                    {getTypeIcon(alert.alert_type)}
-                  </div>
-                  <div className="flex flex-col">
-                    <div className="font-medium capitalize">{alert.alert_type} Detection</div>
-                    <div className="text-sm text-muted-foreground">
-                      Bin {alert.bin_id}
-                      {alert.description && ` • ${alert.description}`}
-                    </div>
-                  </div>
-                </div>
-
-                <div className="flex items-center space-x-3">
-                  <Badge className={cn("text-xs", getSeverityColor(severity))}>{severity}</Badge>
-                  <div className="text-xs text-muted-foreground">{formatTimestamp(alert.timestamp)}</div>
-                </div>
-              </div>
-            )
-          })}
-        </div>
-        <div className="mt-4 flex justify-end">
-          <Button variant="outline" size="sm" asChild>
-            <a href="/alerts">View All Alerts</a>
           </Button>
         </div>
       </CardContent>

@@ -183,48 +183,6 @@ export async function deleteBin(id: string): Promise<void> {
 }
 
 // ============================================
-// ALERTS API
-// ============================================
-
-export interface AIAlert {
-  id: number
-  bin_id: string
-  alert_type: string
-  description?: string
-  timestamp: string
-}
-
-export async function getAlerts(): Promise<AIAlert[]> {
-  return fetchAPI<AIAlert[]>('/ai_alerts')
-}
-
-export async function getAlert(id: number): Promise<AIAlert> {
-  return fetchAPI<AIAlert>(`/ai_alerts/${id}`)
-}
-
-export interface CreateAlertRequest {
-  bin_id: string
-  alert_type: string
-  description?: string
-  timestamp?: string
-}
-
-export async function createAlert(
-  data: CreateAlertRequest
-): Promise<{ accepted: boolean; bin_id: string; alert_type: string }> {
-  return fetchAPI('/ai_alerts', {
-    method: 'POST',
-    body: JSON.stringify(data),
-  })
-}
-
-export async function deleteAlert(id: number): Promise<void> {
-  return fetchAPI<void>(`/ai_alerts/${id}`, {
-    method: 'DELETE',
-  })
-}
-
-// ============================================
 // TELEMETRY API
 // ============================================
 

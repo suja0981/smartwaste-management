@@ -9,7 +9,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from datetime import datetime, timedelta
 from collections import defaultdict
 import time
-from typing import Dict, Tuple
+from typing import Dict, Tuple, Set
 
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
@@ -97,6 +97,105 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                 del self.requests[ip]
 
 
+class AuthRateLimitMiddleware(BaseHTTPMiddleware):
+    """
+    Stricter rate limiting for authentication endpoints.
+    Prevents brute force attacks on login, signup, and password reset.
+    
+    Limits: 5 attempts per minute per IP address
+    """
+
+    def __init__(self, app: FastAPI, requests_per_minute: int = 5):
+        super().__init__(app)
+        self.requests_per_minute = requests_per_minute
+        self.requests: Dict[str, list] = defaultdict(list)
+        self.cleanup_interval = 300
+        self.last_cleanup = time.time()
+        # Track failed login attempts for progressive lockout
+        self.failed_attempts: Dict[str, list] = defaultdict(list)
+        self.lockout_threshold = 10  # Lock out after 10 failed attempts
+        self.lockout_duration = 300  # 5 minutes lockout
+
+    async def dispatch(self, request: Request, call_next):
+        # Only apply to auth endpoints
+        if not request.url.path.startswith("/auth/"):
+            return await call_next(request)
+
+        client_ip = request.client.host if request.client else "unknown"
+        now = time.time()
+
+        # Cleanup periodically
+        if now - self.last_cleanup > self.cleanup_interval:
+            self._cleanup_old_entries(now)
+            self.last_cleanup = now
+
+        # Check if IP is currently locked out
+        lockout_attempts = [
+            t for t in self.failed_attempts.get(client_ip, [])
+            if t > now - self.lockout_duration
+        ]
+        if len(lockout_attempts) >= self.lockout_threshold:
+            return JSONResponse(
+                status_code=429,
+                content={
+                    "error": "Too many authentication attempts",
+                    "message": "Account temporarily locked. Please try again later.",
+                    "retry_after": self.lockout_duration,
+                },
+                headers={"Retry-After": str(self.lockout_duration)},
+            )
+
+        # Check general rate limit (5 per minute)
+        minute_ago = now - 60
+        self.requests[client_ip] = [
+            req_time for req_time in self.requests[client_ip]
+            if req_time > minute_ago
+        ]
+
+        if len(self.requests[client_ip]) >= self.requests_per_minute:
+            return JSONResponse(
+                status_code=429,
+                content={
+                    "error": "Rate limit exceeded",
+                    "message": f"Too many authentication attempts. Max {self.requests_per_minute} per minute.",
+                    "retry_after": 60,
+                },
+                headers={"Retry-After": "60"},
+            )
+
+        self.requests[client_ip].append(now)
+
+        # Call the actual endpoint
+        response = await call_next(request)
+
+        # Track failed login/signup attempts
+        if response.status_code in [401, 422, 400]:  # Auth failure codes
+            self.failed_attempts[client_ip].append(now)
+
+        response.headers["X-RateLimit-Limit"] = str(self.requests_per_minute)
+        response.headers["X-RateLimit-Remaining"] = str(
+            max(0, self.requests_per_minute - len(self.requests[client_ip]))
+        )
+
+        return response
+
+    def _cleanup_old_entries(self, current_time: float):
+        """Remove old entries to prevent memory buildup"""
+        cutoff_time = current_time - 3600
+        for ip in list(self.requests.keys()):
+            self.requests[ip] = [
+                t for t in self.requests[ip] if t > cutoff_time
+            ]
+            if not self.requests[ip]:
+                del self.requests[ip]
+        for ip in list(self.failed_attempts.keys()):
+            self.failed_attempts[ip] = [
+                t for t in self.failed_attempts[ip] if t > cutoff_time
+            ]
+            if not self.failed_attempts[ip]:
+                del self.failed_attempts[ip]
+
+
 class InputValidationMiddleware(BaseHTTPMiddleware):
     """
     Middleware to validate and sanitize input
@@ -137,13 +236,16 @@ def add_security_to_app(app: FastAPI, enable_rate_limiting: bool = True,
     Args:
         app: FastAPI application instance
         enable_rate_limiting: Whether to enable rate limiting
-        requests_per_minute: Rate limit threshold
+        requests_per_minute: Rate limit threshold for general API
     """
     # Add security headers middleware (should be last for proper header setting)
     app.add_middleware(SecurityHeadersMiddleware)
     
     # Add input validation middleware
     app.add_middleware(InputValidationMiddleware)
+    
+    # Add stricter auth rate limiting (5 req/min on /auth/* endpoints)
+    app.add_middleware(AuthRateLimitMiddleware, requests_per_minute=5)
     
     # Add rate limiting middleware if enabled
     if enable_rate_limiting:

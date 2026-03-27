@@ -1,151 +1,290 @@
-'use client'
+"use client";
 
-import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react'
+/**
+ * contexts/auth-context.tsx — Phase 2 complete rewrite.
+ *
+ * Supports:
+ *   - Google Sign-In via Firebase
+ *   - Email/Password via Firebase
+ *   - Legacy local login (POST /auth/login) — kept for admin accounts
+ *     that were created before Firebase was added
+ *
+ * After any successful sign-in we exchange the Firebase ID token for our
+ * own backend JWT.  Every API call then uses that JWT — no Firebase SDK
+ * calls outside this file.
+ */
 
-export interface User {
-    id: number
-    email: string
-    full_name: string
-    role: 'admin' | 'user'
-    is_active: boolean
+import React, {
+    createContext,
+    useContext,
+    useEffect,
+    useState,
+    useCallback,
+    ReactNode,
+} from "react";
+import {
+    auth,
+    signInWithGoogle,
+    signInWithEmail,
+    registerWithEmail,
+    firebaseSignOut,
+    getFirebaseIdToken,
+    onAuthStateChanged,
+    User as FirebaseUser,
+} from "@/lib/firebase";
+
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+interface BackendUser {
+    id: number;
+    email: string;
+    full_name: string;
+    role: "admin" | "user";
+    is_active: boolean;
 }
 
-export interface AuthContextType {
-    user: User | null
-    token: string | null
-    isLoading: boolean
-    isAdmin: boolean
-    login: (email: string, password: string) => Promise<void>
-    signup: (email: string, password: string, fullName: string) => Promise<void>
-    logout: () => void
-    isAuthenticated: boolean
+interface AuthContextType {
+    // State
+    user: BackendUser | null;
+    token: string | null;
+    isLoading: boolean;
+    isAuthenticated: boolean;
+    isAdmin: boolean;
+
+    // Actions
+    loginWithGoogle: () => Promise<void>;
+    loginWithEmail: (email: string, password: string) => Promise<void>;
+    registerWithEmailPassword: (
+        email: string,
+        password: string,
+        fullName: string
+    ) => Promise<void>;
+    /** Legacy local login — still works for admin accounts without Firebase */
+    loginLocal: (email: string, password: string) => Promise<void>;
+    logout: () => Promise<void>;
 }
 
-const AuthContext = createContext<AuthContextType | undefined>(undefined)
+// ─── Context ──────────────────────────────────────────────────────────────────
+
+const AuthContext = createContext<AuthContextType | null>(null);
+
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+const TOKEN_KEY = "swm_token";
+const REFRESH_TOKEN_KEY = "swm_refresh_token";
+const USER_KEY = "swm_user";
+
+// ─── Provider ─────────────────────────────────────────────────────────────────
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-    const [user, setUser] = useState<User | null>(null)
-    const [token, setToken] = useState<string | null>(null)
-    const [isLoading, setIsLoading] = useState(true)
+    const [user, setUser] = useState<BackendUser | null>(null);
+    const [token, setToken] = useState<string | null>(null);
+    const [isLoading, setIsLoading] = useState(true);
 
-    // Load token from localStorage on mount
+    // ── Persist / restore session ────────────────────────────────────────────
+
+    const persistSession = useCallback(
+        (jwt: string, backendUser: BackendUser, refreshToken?: string) => {
+            localStorage.setItem(TOKEN_KEY, jwt);
+            if (refreshToken) {
+                localStorage.setItem(REFRESH_TOKEN_KEY, refreshToken);
+            }
+            localStorage.setItem(USER_KEY, JSON.stringify(backendUser));
+            setToken(jwt);
+            setUser(backendUser);
+        },
+        []
+    );
+
+    const clearSession = useCallback(() => {
+        localStorage.removeItem(TOKEN_KEY);
+        localStorage.removeItem(REFRESH_TOKEN_KEY);
+        localStorage.removeItem(USER_KEY);
+        setToken(null);
+        setUser(null);
+    }, []);
+
+    // ── Exchange Firebase ID token for our backend JWT ────────────────────────
+
+    const refreshAccessToken = useCallback(async (): Promise<void> => {
+        const refreshToken = localStorage.getItem(REFRESH_TOKEN_KEY);
+        if (!refreshToken) return;
+
+        try {
+            const res = await fetch(`${API_BASE}/auth/refresh`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ refresh_token: refreshToken }),
+            });
+
+            if (!res.ok) {
+                // Refresh failed - clear session and force re-login
+                clearSession();
+                return;
+            }
+
+            const data = await res.json();
+            persistSession(data.access_token, data.user, data.refresh_token);
+        } catch (error) {
+            // Network error - keep existing token
+        }
+    }, [persistSession, clearSession]);
+
+    const exchangeFirebaseToken = useCallback(
+        async (firebaseUser: FirebaseUser): Promise<void> => {
+            const idToken = await getFirebaseIdToken(firebaseUser);
+
+            const res = await fetch(`${API_BASE}/auth/firebase`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ id_token: idToken }),
+            });
+
+            if (!res.ok) {
+                const err = await res.json().catch(() => ({}));
+                throw new Error(err.detail || "Failed to authenticate with backend");
+            }
+
+            const data = await res.json();
+            persistSession(data.access_token, data.user, data.refresh_token);
+        },
+        [persistSession]
+    );
+
+    // ── Listen to Firebase auth state ─────────────────────────────────────────
+    // This fires on page load, after Google sign-in, and after sign-out.
+
     useEffect(() => {
-        const storedToken = localStorage.getItem('authToken')
-        if (storedToken) {
-            setToken(storedToken)
-            // Optionally verify token and get user info
-            verifyToken(storedToken)
-        } else {
-            setIsLoading(false)
+        // Restore from localStorage first (instant — no flicker)
+        const savedToken = localStorage.getItem(TOKEN_KEY);
+        const savedUser = localStorage.getItem(USER_KEY);
+        if (savedToken && savedUser) {
+            setToken(savedToken);
+            setUser(JSON.parse(savedUser));
         }
-    }, [])
 
-    async function verifyToken(authToken: string) {
-        try {
-            const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
-            const response = await fetch(`${apiUrl}/auth/me`, {
-                headers: {
-                    Authorization: `Bearer ${authToken}`,
-                },
-            })
-            if (response.ok) {
-                const userData = await response.json()
-                setUser(userData)
+        const unsubscribe = onAuthStateChanged(auth, async (firebaseUser: FirebaseUser | null) => {
+            if (firebaseUser) {
+                // Firebase user is signed in — keep backend token fresh
+                try {
+                    await exchangeFirebaseToken(firebaseUser);
+                } catch {
+                    // If exchange fails (e.g. backend down) keep existing token
+                }
             } else {
-                localStorage.removeItem('authToken')
-                setToken(null)
+                // Firebase signed out — but keep local-login sessions alive
+                // (they don't have a Firebase user)
+                const stillHasLocalToken = localStorage.getItem(TOKEN_KEY);
+                if (!stillHasLocalToken) {
+                    clearSession();
+                }
             }
-        } catch (error) {
-            console.error('Token verification failed:', error)
-            localStorage.removeItem('authToken')
-            setToken(null)
-        } finally {
-            setIsLoading(false)
-        }
-    }
+            setIsLoading(false);
+        });
 
-    async function login(email: string, password: string) {
-        setIsLoading(true)
-        try {
-            const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
-            const response = await fetch(`${apiUrl}/auth/login`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({ email, password }),
-            })
+        return unsubscribe;
+    }, [exchangeFirebaseToken, clearSession]);
 
-            if (!response.ok) {
-                const error = await response.json()
-                throw new Error(error.detail || 'Login failed')
-            }
+    // ── Actions ───────────────────────────────────────────────────────────────
 
-            const data = await response.json()
-            const authToken = data.access_token
-            setToken(authToken)
-            setUser(data.user)
-            localStorage.setItem('authToken', authToken)
-        } catch (error) {
-            throw error
-        } finally {
-            setIsLoading(false)
-        }
-    }
+    const loginWithGoogle = useCallback(async () => {
+        const result = await signInWithGoogle();
+        // onAuthStateChanged fires automatically — but we also exchange here
+        // for immediate response (no waiting for the listener)
+        await exchangeFirebaseToken(result.user);
+    }, [exchangeFirebaseToken]);
 
-    async function signup(email: string, password: string, fullName: string) {
-        setIsLoading(true)
-        try {
-            const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
-            const response = await fetch(`${apiUrl}/auth/signup`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
+    const loginWithEmail = useCallback(
+        async (email: string, password: string) => {
+            const result = await signInWithEmail(email, password);
+            await exchangeFirebaseToken(result.user);
+        },
+        [exchangeFirebaseToken]
+    );
+
+    const registerWithEmailPassword = useCallback(
+        async (email: string, password: string, fullName: string) => {
+            // 1. Create Firebase account
+            const result = await registerWithEmail(email, password);
+            // 2. Also register in our backend (so full_name is stored)
+            const res = await fetch(`${API_BASE}/auth/signup`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ email, password, full_name: fullName }),
-            })
-
-            if (!response.ok) {
-                const error = await response.json()
-                throw new Error(error.detail || 'Signup failed')
+            });
+            if (!res.ok) {
+                // Clean up the Firebase account if our backend rejected it
+                await result.user.delete();
+                const err = await res.json().catch(() => ({}));
+                throw new Error(err.detail || "Registration failed");
             }
+            const data = await res.json();
+            persistSession(data.access_token, data.user, data.refresh_token);
+        },
+        [persistSession]
+    );
 
-            const data = await response.json()
-            const authToken = data.access_token
-            setToken(authToken)
-            setUser(data.user)
-            localStorage.setItem('authToken', authToken)
-        } catch (error) {
-            throw error
-        } finally {
-            setIsLoading(false)
+    /** Legacy local login — for admin accounts created before Firebase */
+    const loginLocal = useCallback(
+        async (email: string, password: string) => {
+            const res = await fetch(`${API_BASE}/auth/login`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ email, password }),
+            });
+            if (!res.ok) {
+                const err = await res.json().catch(() => ({}));
+                throw new Error(err.detail || "Invalid email or password");
+            }
+            const data = await res.json();
+            persistSession(data.access_token, data.user, data.refresh_token);
+        },
+        [persistSession]
+    );
+
+    const logout = useCallback(async () => {
+        // Call backend logout to revoke the JWT
+        try {
+            await fetch(`${API_BASE}/auth/logout`, {
+                method: "POST",
+                headers: {
+                    "Authorization": `Bearer ${token}`,
+                    "Content-Type": "application/json",
+                },
+            }).catch(() => { }); // Ignore errors
+        } catch {
+            // Silently fail - still clear local session
         }
-    }
 
-    function logout() {
-        setUser(null)
-        setToken(null)
-        localStorage.removeItem('authToken')
-    }
+        await firebaseSignOut().catch(() => { }); // don't throw if no Firebase session
+        clearSession();
+    }, [token, clearSession]);
 
-    const value: AuthContextType = {
-        user,
-        token,
-        isLoading,
-        isAdmin: user?.role === 'admin' || false,
-        login,
-        signup,
-        logout,
-        isAuthenticated: !!user && !!token,
-    }
-
-    return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
+    return (
+        <AuthContext.Provider
+            value={{
+                user,
+                token,
+                isLoading,
+                isAuthenticated: !!token && !!user,
+                isAdmin: user?.role === "admin",
+                loginWithGoogle,
+                loginWithEmail,
+                registerWithEmailPassword,
+                loginLocal,
+                logout,
+            }}
+        >
+            {children}
+        </AuthContext.Provider>
+    );
 }
 
-export function useAuth() {
-    const context = useContext(AuthContext)
-    if (context === undefined) {
-        throw new Error('useAuth must be used within an AuthProvider')
+// ─── Hook ─────────────────────────────────────────────────────────────────────
+
+export function useAuth(): AuthContextType {
+    const ctx = useContext(AuthContext);
+    if (!ctx) {
+        throw new Error("useAuth must be used inside <AuthProvider>");
     }
-    return context
+    return ctx;
 }

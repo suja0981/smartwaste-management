@@ -1,6 +1,8 @@
 # Smart Waste Management System
 
-A comprehensive IoT-based waste management platform with AI-powered monitoring, route optimization, and crew management. Built with **FastAPI** (backend), **Next.js** (frontend), and **SQLite** (database).
+> ⚡ **Database Migration Available:** This project supports both **SQLite** (development) and **PostgreSQL** (production). See [POSTGRESQL_QUICK_START.md](POSTGRESQL_QUICK_START.md) for enterprise deployment.
+
+A comprehensive IoT-based waste management platform with AI-powered monitoring, route optimization, and crew management. Built with **FastAPI** (backend), **Next.js** (frontend), and **SQLite/PostgreSQL** (database).
 
 ## 📋 Table of Contents
 
@@ -21,6 +23,7 @@ A comprehensive IoT-based waste management platform with AI-powered monitoring, 
 ## 🎯 Overview
 
 Smart Waste Management is an end-to-end solution for optimizing waste collection operations using:
+
 - **IoT Sensors** — Real-time bin fill-level monitoring
 - **AI-Powered CCTV** — Intelligent alert detection and classification
 - **Route Optimization** — AI-driven collection route planning
@@ -63,6 +66,7 @@ Smart Waste Management is an end-to-end solution for optimizing waste collection
 ## ✨ Features
 
 ### Authentication & Authorization
+
 - **User Registration** — Email/password signup with validation
 - **Admin Login** — Full system access
 - **User Login** — Read-only access to dashboards
@@ -70,12 +74,14 @@ Smart Waste Management is an end-to-end solution for optimizing waste collection
 - **Role-Based Access** — Admin-only routes and user-level restrictions
 
 ### Waste Management
+
 - **Bin Management** — Add, edit, delete, track waste bins
 - **Telemetry Monitoring** — Real-time fill levels, battery status, temperature
 - **AI Alerts** — CCTV-powered anomaly detection (fire, spillage, unauthorized activity)
 - **Statistics Dashboard** — Aggregate metrics and reporting
 
 ### Operations
+
 - **Route Optimization** — AI-driven collection route planning
 - **Crew Management** — Team assignment and task tracking
 - **Predictive Analytics** — ML models for bin fullness forecasting
@@ -83,12 +89,14 @@ Smart Waste Management is an end-to-end solution for optimizing waste collection
 ## 📦 Prerequisites
 
 ### System Requirements
+
 - **Python 3.13+** (or Python 3.10+)
 - **Node.js 18+** (for frontend)
 - **pnpm 8+** (or npm/yarn)
 - **Git**
 
 ### Installation Prerequisites
+
 - Virtual environment setup (Python venv or conda)
 - Windows: PowerShell or Command Prompt
 - macOS/Linux: Bash or compatible shell
@@ -100,6 +108,7 @@ Smart Waste Management is an end-to-end solution for optimizing waste collection
 For detailed command explanations, see [COMMANDS.md](COMMANDS.md)
 
 **Windows PowerShell:**
+
 ```powershell
 # 1. Navigate to project
 cd d:\smart-waste-management
@@ -125,6 +134,7 @@ python populate_test_data.py
 ```
 
 **macOS/Linux:**
+
 ```bash
 cd ~/smart-waste-management
 
@@ -147,40 +157,48 @@ python populate_test_data.py
 ### Start Both Backend & Frontend
 
 **Terminal 1 - Backend:**
+
 ```powershell
 cd d:\smart-waste-management\backend
 .\..\venv\Scripts\Activate.ps1
 uvicorn main:app --reload
 ```
+
 ✅ Backend: `http://localhost:8000`
 ✅ Swagger UI: `http://localhost:8000/docs`
 
 **Terminal 2 - Frontend:**
+
 ```powershell
 cd d:\smart-waste-management\frontend
 pnpm dev
 ```
+
 ✅ Frontend: `http://localhost:3000`
 
 **Terminal 3 - (Optional) IoT Simulator:**
+
 ```powershell
 cd d:\smart-waste-management\backend
 python simulate_iot.py
 ```
 
 **Terminal 4 - (Optional) AI Alert Simulator:**
+
 ```powershell
 cd d:\smart-waste-management\backend
 python simulate_ai_alerts.py
 ```
 
 ### Run Backend Only
+
 ```powershell
 cd backend
 uvicorn main:app --reload
 ```
 
 ### Run Frontend Only
+
 ```powershell
 cd frontend
 pnpm dev
@@ -189,12 +207,14 @@ pnpm dev
 ## 🔐 Authentication
 
 ### Demo Accounts
-| Email | Password | Role | Access |
-|-------|----------|------|--------|
+
+| Email             | Password    | Role  | Access             |
+| ----------------- | ----------- | ----- | ------------------ |
 | admin@example.com | password123 | Admin | Full system access |
-| user@example.com | password123 | User | Read-only access |
+| user@example.com  | password123 | User  | Read-only access   |
 
 ### Login Steps
+
 1. Go to `http://localhost:3000`
 2. Click "Login" or navigate to `/login`
 3. Enter email and password
@@ -203,6 +223,7 @@ pnpm dev
 6. Redirected to dashboard
 
 ### Signup Steps
+
 1. Navigate to `http://localhost:3000/signup`
 2. Enter email, full name, password
 3. Password requirements: 8+ chars, uppercase, lowercase, number
@@ -212,6 +233,7 @@ pnpm dev
 ## 📡 API Endpoints
 
 ### Authentication
+
 ```
 POST   /auth/signup              — Register new user
 POST   /auth/login               — Login and get JWT token
@@ -220,6 +242,7 @@ POST   /auth/logout              — Logout (client-side)
 ```
 
 ### Bins
+
 ```
 GET    /bins                     — List all bins
 POST   /bins                     — Create new bin
@@ -229,12 +252,14 @@ DELETE /bins/{bin_id}            — Delete bin
 ```
 
 ### Telemetry
+
 ```
 POST   /telemetry                — Submit IoT sensor data
 GET    /telemetry/{bin_id}       — Get bin telemetry history
 ```
 
 ### AI Alerts
+
 ```
 POST   /ai_alerts                — Submit CCTV AI alert
 GET    /ai_alerts                — List all alerts
@@ -243,6 +268,7 @@ PUT    /ai_alerts/{alert_id}     — Update alert status
 ```
 
 ### Statistics
+
 ```
 GET    /stats/dashboard          — Dashboard metrics
 GET    /stats/bins               — Bin statistics
@@ -250,6 +276,7 @@ GET    /stats/alerts             — Alert statistics
 ```
 
 ### Crews
+
 ```
 GET    /crews                    — List all crews
 POST   /crews                    — Create new crew
@@ -259,6 +286,7 @@ DELETE /crews/{crew_id}          — Delete crew
 ```
 
 ### Tasks
+
 ```
 GET    /tasks                    — List all tasks
 POST   /tasks                    — Create new task
@@ -267,6 +295,7 @@ DELETE /tasks/{task_id}          — Delete task
 ```
 
 ### Routes
+
 ```
 GET    /routes                   — List optimized routes
 POST   /routes/optimize          — Generate optimized route
@@ -274,6 +303,7 @@ GET    /routes/{route_id}        — Get route details
 ```
 
 ### Health
+
 ```
 GET    /health                   — Health check
 GET    /                         — API info
@@ -369,6 +399,7 @@ smart-waste-management/
 ## 💾 Database
 
 ### SQLite Database
+
 - **Location**: `backend/smart_waste.db`
 - **Auto-created** on first backend run
 - **Tables**:
@@ -383,46 +414,55 @@ smart-waste-management/
 ## 🧪 Testing & Simulation
 
 ### Populate Test Data
+
 ```powershell
 cd backend
 python populate_test_data.py
 ```
+
 Creates sample bins, crews, tasks, and routes.
 
 ### IoT Sensor Simulator
+
 ```powershell
 cd backend
 python simulate_iot.py
 ```
+
 Generates realistic telemetry data:
+
 - Fill levels (0-100%)
 - Battery levels (0-100%)
 - Temperature readings (-5 to 50°C)
 - Updates every 5-10 seconds
 
 ### AI Alert Simulator
+
 ```powershell
 cd backend
 python simulate_ai_alerts.py
 ```
+
 Generates CCTV alerts:
+
 - Fire detection
 - Spillage incidents
 - Unauthorized access
 - Random intervals (10-30 seconds)
 
 ### Test Endpoints
+
 Access Swagger UI at `http://localhost:8000/docs` to interactively test all endpoints.
 
 ## 📚 Documentation
 
-| Document | Purpose |
-|----------|---------|
-| [COMMANDS.md](COMMANDS.md) | All setup and run commands |
-| [AUTHENTICATION.md](docs/AUTHENTICATION.md) | Complete auth system documentation |
-| [AUTH_QUICKSTART.md](docs/AUTH_QUICKSTART.md) | Quick reference & demo accounts |
-| [ARCHITECTURE.md](docs/ARCHITECTURE.md) | System diagrams & technical architecture |
-| [GETTING_STARTED.md](docs/GETTING_STARTED.md) | Step-by-step setup instructions |
+| Document                                                    | Purpose                                  |
+| ----------------------------------------------------------- | ---------------------------------------- |
+| [COMMANDS.md](COMMANDS.md)                                  | All setup and run commands               |
+| [AUTHENTICATION.md](docs/AUTHENTICATION.md)                 | Complete auth system documentation       |
+| [AUTH_QUICKSTART.md](docs/AUTH_QUICKSTART.md)               | Quick reference & demo accounts          |
+| [ARCHITECTURE.md](docs/ARCHITECTURE.md)                     | System diagrams & technical architecture |
+| [GETTING_STARTED.md](docs/GETTING_STARTED.md)               | Step-by-step setup instructions          |
 | [IMPLEMENTATION_SUMMARY.md](docs/IMPLEMENTATION_SUMMARY.md) | Feature summary & implementation details |
 
 ## 🛠️ Troubleshooting
@@ -430,6 +470,7 @@ Access Swagger UI at `http://localhost:8000/docs` to interactively test all endp
 ### Backend Won't Start
 
 **Error: `ImportError: cannot import name 'telemetry'`**
+
 ```
 Solution: Check main.py imports match router filenames
 File: backend/main.py, Line 5
@@ -438,12 +479,14 @@ To:      from routers import telemetry_update
 ```
 
 **Error: `ModuleNotFoundError: No module named 'passlib'`**
+
 ```
 Solution: Reinstall dependencies
 pip install -r requirements.txt --force-reinstall --upgrade
 ```
 
 **Error: `SQLAlchemy AssertionError (Python 3.13)`**
+
 ```
 Solution: Update SQLAlchemy version
 pip install SQLAlchemy==2.0.31 --force-reinstall
@@ -452,11 +495,13 @@ pip install SQLAlchemy==2.0.31 --force-reinstall
 ### Frontend Connection Issues
 
 **Error: `Failed to fetch from http://localhost:8000`**
+
 1. Ensure backend is running: `uvicorn main:app --reload`
 2. Check CORS in `backend/main.py` (should be `allow_origins=["*"]`)
 3. Verify API URL in `frontend/lib/api-client.ts`
 
 **Port 3000 already in use:**
+
 ```powershell
 # Find process
 netstat -ano | findstr :3000
@@ -466,6 +511,7 @@ taskkill /PID <PID> /F
 ```
 
 **Port 8000 already in use:**
+
 ```powershell
 netstat -ano | findstr :8000
 taskkill /PID <PID> /F
@@ -474,10 +520,12 @@ taskkill /PID <PID> /F
 ### Database Errors
 
 **Error: `Database is locked`**
+
 - Close all backend instances
 - Restart uvicorn
 
 **Error: `Table 'users' does not exist`**
+
 ```powershell
 # Delete database to force recreate
 rm backend/smart_waste.db
@@ -488,11 +536,13 @@ uvicorn main:app --reload
 ### Authentication Issues
 
 **Can't login with demo account:**
+
 1. Verify user was created: Check `smart_waste.db` or run `python seed_users.py` again
 2. Check browser LocalStorage cleared (F12 → Application → LocalStorage)
 3. Verify backend is returning token
 
 **Frontend keeps redirecting to login:**
+
 - Check browser console (F12) for errors
 - Verify JWT token stored in LocalStorage
 - Check if token expired (30-minute timeout)
@@ -500,6 +550,7 @@ uvicorn main:app --reload
 ## 📊 Technology Stack
 
 ### Backend
+
 - **FastAPI** 0.109.0 — Web framework
 - **SQLAlchemy** 2.0.31 — ORM
 - **SQLite** — Database
@@ -511,6 +562,7 @@ uvicorn main:app --reload
 - **Python** 3.13
 
 ### Frontend
+
 - **Next.js** 14 — React framework
 - **React** 18 — UI library
 - **TypeScript** — Type safety
@@ -529,5 +581,3 @@ uvicorn main:app --reload
 - Passwords hashed with bcrypt (cost factor: 10)
 - Admin role has full CRUD access
 - User role has read-only access to dashboards
-
-

@@ -36,12 +36,19 @@ class UserResponse(BaseModel):
 
 class TokenResponse(BaseModel):
     access_token: str
+    refresh_token: Optional[str] = None
     token_type: str = "bearer"
+    expires_in: int = 1800  # 30 minutes in seconds
     user: UserResponse
+
+class TokenRefreshRequest(BaseModel):
+    """Request to refresh an expired access token"""
+    refresh_token: str
 
 class TokenData(BaseModel):
     email: Optional[str] = None
     role: Optional[str] = None
+    token_type: Optional[str] = None  # 'access' or 'refresh'
 
 # Bin models
 class Bin(BaseModel):
@@ -77,20 +84,6 @@ class TelemetryPayload(BaseModel):
     temperature_c: Optional[float] = None
     humidity_percent: Optional[int] = Field(default=None, ge=0, le=100)
     timestamp: Optional[datetime] = None
-
-# AI Alert models
-class AIAlertPayload(BaseModel):
-    bin_id: str
-    alert_type: str = Field(description="Type of alert, e.g., fire, vandalism, overflow")
-    description: Optional[str] = Field(default=None, description="Additional details about the alert")
-    timestamp: Optional[datetime] = None
-
-class AIAlert(BaseModel):
-    id: int
-    bin_id: str
-    alert_type: str
-    description: Optional[str] = None
-    timestamp: datetime
 
 # Crew models
 class Crew(BaseModel):

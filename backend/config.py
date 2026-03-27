@@ -1,6 +1,6 @@
 """
-Configuration management for Smart Waste Management System
-Loads environment variables from .env file and provides configuration
+Configuration — Phase 2 update.
+Added Firebase service account path + IoT API key prefix.
 """
 
 from pydantic_settings import BaseSettings
@@ -10,9 +10,7 @@ import os
 
 
 class Settings(BaseSettings):
-    """Application settings loaded from environment variables"""
-
-    # Core API Settings
+    # ── Core API ──────────────────────────────────────────────────────────────
     api_title: str = "Smart Waste Management API"
     api_description: str = "AI-Powered CCTV Monitoring, IoT Sensors, Route Optimization & ML Predictions"
     api_version: str = "3.0.0"
@@ -21,73 +19,61 @@ class Settings(BaseSettings):
     api_reload: bool = True
     environment: str = "development"
 
-    # Security
+    # ── Security ──────────────────────────────────────────────────────────────
     secret_key: str = "your-super-secret-key-change-this-in-production"
     algorithm: str = "HS256"
-    access_token_expire_minutes: int = 30
-
-    # Database
+    access_token_expire_minutes: int = 30    
+    refresh_token_expire_days: int = 7
+    # ── Database ──────────────────────────────────────────────────────────────
+    # SQLite (default): "sqlite:///./smart_waste.db"
+    # PostgreSQL: "postgresql://user:password@localhost:5432/smart_waste"
+    # PostgreSQL (psycopg): "postgresql+psycopg://user:password@localhost:5432/smart_waste"
     database_url: str = "sqlite:///./smart_waste.db"
 
-    # CORS
+    # ── CORS ──────────────────────────────────────────────────────────────────
     cors_origins: str = "http://localhost:3000,http://localhost:8080,http://127.0.0.1:3000"
 
-    # Logging
+    # ── Logging ───────────────────────────────────────────────────────────────
     log_level: str = "INFO"
 
-    # ML Settings
+    # ── ML ────────────────────────────────────────────────────────────────────
     ml_enabled: bool = True
     ml_sensitivity: float = 2.5
     ml_fill_prediction_threshold: int = 80
     ml_collection_confidence_min: float = 0.5
 
+    # ── Firebase (Phase 2) ────────────────────────────────────────────────────
+    # Option A: path to downloaded service account JSON file
+    firebase_service_account_path: Optional[str] = None
+    # Option B: entire JSON as a string (better for Docker / env-only deploys)
+    firebase_credentials_json: Optional[str] = None
+    # Your Firebase project ID (used to validate tokens)
+    firebase_project_id: Optional[str] = None
+
+    # ── IoT API Keys ──────────────────────────────────────────────────────────
+    # Prefix makes keys recognisable and prevents accidental use of other secrets
+    api_key_prefix: str = "wsk_live_"
+
     class Config:
-        """Pydantic config"""
         env_file = ".env"
         env_file_encoding = "utf-8"
         case_sensitive = False
 
     @property
     def cors_origins_list(self) -> List[str]:
-        """Parse comma-separated CORS origins into list"""
-        return [origin.strip() for origin in self.cors_origins.split(",")]
-
-    def get_database_url(self) -> str:
-        """Get the database URL, handling different database types"""
-        url = self.database_url
-        
-        # For SQLite, create the database directory if it doesn't exist
-        if url.startswith("sqlite:"):
-            # Extract the file path
-            if ":///" in url:
-                file_path = url.replace("sqlite:///", "")
-            else:
-                file_path = url.replace("sqlite://", "")
-            
-            # Create parent directories if needed
-            dir_path = os.path.dirname(file_path)
-            if dir_path and not os.path.exists(dir_path):
-                os.makedirs(dir_path, exist_ok=True)
-        
-        return url
+        return [o.strip() for o in self.cors_origins.split(",")]
 
     def is_production(self) -> bool:
-        """Check if running in production"""
         return self.environment.lower() == "production"
 
-    def should_reload_on_change(self) -> bool:
-        """Check if app should reload on code changes"""
-        return self.api_reload and not self.is_production()
+    def firebase_configured(self) -> bool:
+        """Returns True if Firebase credentials are available."""
+        return bool(self.firebase_service_account_path or self.firebase_credentials_json)
 
 
 @lru_cache()
 def get_settings() -> Settings:
-    """
-    Get cached settings instance
-    Using lru_cache to ensure settings are loaded only once
-    """
     return Settings()
 
 
-# Export settings instance for easy importing
 settings = get_settings()

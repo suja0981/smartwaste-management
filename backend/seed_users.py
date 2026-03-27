@@ -1,6 +1,9 @@
 """
-Script to seed test users into the database
-Run this once to create admin and user accounts for testing
+Seed demo users into the database.
+
+FIX: Old demo password "password123" fails the PasswordPolicy that's now
+     enforced at signup (requires a special character).
+     Demo passwords updated to "Admin@1234" and "User@1234".
 """
 
 import sys
@@ -9,73 +12,67 @@ from sqlalchemy.orm import Session
 from database import SessionLocal, UserDB, engine, Base
 from passlib.context import CryptContext
 
-# Password hashing
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
+
 def get_password_hash(password: str) -> str:
-    """Hash a password using bcrypt."""
     return pwd_context.hash(password)
 
+
 def seed_users():
-    """Create initial test users."""
-    # Create tables if they don't exist
     Base.metadata.create_all(bind=engine)
-    
     db = SessionLocal()
-    
+
     try:
-        # Check if users already exist
-        admin = db.query(UserDB).filter(UserDB.email == "admin@example.com").first()
-        user = db.query(UserDB).filter(UserDB.email == "user@example.com").first()
-        
+        admin_email = "admin@example.com"
+        user_email = "user@example.com"
+        admin_password = "Admin@1234"
+        user_password = "User@1234"
+
+        admin = db.query(UserDB).filter(UserDB.email == admin_email).first()
         if admin:
             print("✓ Admin user already exists")
         else:
-            admin_user = UserDB(
-                email="admin@example.com",
+            db.add(UserDB(
+                email=admin_email,
                 full_name="Admin User",
-                hashed_password=get_password_hash("password123"),
+                hashed_password=get_password_hash(admin_password),
                 role="admin",
                 is_active=True,
-                created_at=datetime.utcnow()
-            )
-            db.add(admin_user)
-            print("✓ Created admin user: admin@example.com / password123")
-        
+                created_at=datetime.utcnow(),
+                auth_provider="local",
+            ))
+            print(f"✓ Created admin: {admin_email} / {admin_password}")
+
+        user = db.query(UserDB).filter(UserDB.email == user_email).first()
         if user:
             print("✓ Regular user already exists")
         else:
-            regular_user = UserDB(
-                email="user@example.com",
+            db.add(UserDB(
+                email=user_email,
                 full_name="Regular User",
-                hashed_password=get_password_hash("password123"),
+                hashed_password=get_password_hash(user_password),
                 role="user",
                 is_active=True,
-                created_at=datetime.utcnow()
-            )
-            db.add(regular_user)
-            print("✓ Created user: user@example.com / password123")
-        
+                created_at=datetime.utcnow(),
+                auth_provider="local",
+            ))
+            print(f"✓ Created user:  {user_email} / {user_password}")
+
         db.commit()
-        print("\n✓ Database seeded successfully!")
-        print("\nTest Credentials:")
+        print("\n✅ Database seeded successfully!")
+        print("\n" + "─" * 50)
+        print("ADMIN:  admin@example.com  /  Admin@1234  (full access)")
+        print("USER:   user@example.com   /  User@1234   (read-only)")
         print("─" * 50)
-        print("ADMIN ACCOUNT:")
-        print("  Email: admin@example.com")
-        print("  Password: password123")
-        print("  Access: Full permissions to all features")
-        print("\nUSER ACCOUNT:")
-        print("  Email: user@example.com")
-        print("  Password: password123")
-        print("  Access: View-only permissions")
-        print("─" * 50)
-        
+
     except Exception as e:
         db.rollback()
         print(f"✗ Error seeding database: {e}")
         sys.exit(1)
     finally:
         db.close()
+
 
 if __name__ == "__main__":
     seed_users()

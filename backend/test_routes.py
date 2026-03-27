@@ -294,9 +294,7 @@ def test_optimize_with_crew():
 def main():
     """Run all tests"""
     print("\n")
-    print("╔════════════════════════════════════════════════════════════╗")
     print("║     SMART WASTE MANAGEMENT - ROUTE OPTIMIZATION TESTS     ║")
-    print("╚════════════════════════════════════════════════════════════╝")
     
     # Check if server is running
     try:
