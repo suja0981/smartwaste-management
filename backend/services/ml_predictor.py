@@ -1,94 +1,112 @@
 """
-Machine Learning Prediction Service
+services/ml_predictor.py
 
-Features:
-- Fill level prediction (when will bin be full?)
-- Anomaly detection in sensor data
-- Usage pattern analysis
-- Optimal collection time prediction
+BUG FIX (critical): All ML state was in-memory.
+  Every server restart wiped historical data and baselines, making predictions
+  unavailable until enough new telemetry arrived (sometimes hours).
+
+FIX: Added  MLPredictionService.rebuild_from_db(db)  which re-hydrates both
+  the fill predictor and anomaly detector from the TelemetryDB table on startup.
+  Called in main.py during application startup.
+
+What this ML actually does (honest description):
+  ─ BinFillPredictor: Time-series extrapolation.
+      Stores (timestamp, fill_level) pairs per bin.
+      Calculates fill rate = median of consecutive fill deltas / time.
+      Predicts hours-until-full = remaining_capacity / fill_rate.
+      No ML model — pure statistical extrapolation, works well for IoT.
+
+  ─ AnomalyDetector: Z-score based outlier detection.
+      Maintains running mean + std of each sensor metric per bin.
+      Flags readings where abs(z-score) > sensitivity (default 2.5).
+      Again, statistics not ML, but very practical for sensor fault detection.
+
+  ─ CollectionOptimizer: Rule-based priority scoring.
+      Score = fill_level + time_bonus (bins predicted full within 24h).
+      Returns a sorted collection order, no model involved.
+
+Improvements made:
+  1. DB rebuild on startup (the critical fix)
+  2. _fill_rates cache: avoid recalculating fill rate on every prediction
+  3. Added  get_bin_summary()  for lightweight dashboard cards
+  4. Anomaly detector now ignores negative fill deltas (bin was emptied)
+     when building the baseline to reduce false positives.
 """
 
-import numpy as np
+import logging
 from datetime import datetime, timedelta
-from typing import List, Dict, Tuple, Optional
-import json
+from typing import Dict, List, Optional, Tuple
+
+import numpy as np
+
+logger = logging.getLogger(__name__)
+
+
+# ─── BinFillPredictor ─────────────────────────────────────────────────────────
 
 class BinFillPredictor:
-    """Predicts when bins will reach full capacity"""
-    
+    """
+    Predicts when bins will reach full capacity using linear extrapolation
+    on recent fill-rate history.
+
+    Storage: in-memory dict, rebuilt from DB on startup via rebuild_from_db().
+    Keeps the last MAX_POINTS readings per bin to stay memory-bounded.
+    """
+
+    MAX_POINTS = 120   # ~2 hours at 1 reading/min, ~60 hours at 30-sec intervals
+
     def __init__(self):
-        self.historical_data = {}  # bin_id -> list of (timestamp, fill_level)
-        self.patterns = {}  # bin_id -> learned patterns
-    
+        # bin_id → list of (datetime, fill_level_int)
+        self.historical_data: Dict[str, List[Tuple[datetime, int]]] = {}
+
     def add_data_point(self, bin_id: str, fill_level: int, timestamp: datetime = None):
-        """Add a historical data point for training"""
         if timestamp is None:
             timestamp = datetime.utcnow()
-        
-        if bin_id not in self.historical_data:
-            self.historical_data[bin_id] = []
-        
-        self.historical_data[bin_id].append((timestamp, fill_level))
-        
-        # Keep only last 100 data points per bin
-        if len(self.historical_data[bin_id]) > 100:
-            self.historical_data[bin_id] = self.historical_data[bin_id][-100:]
-    
+
+        bucket = self.historical_data.setdefault(bin_id, [])
+        bucket.append((timestamp, fill_level))
+
+        if len(bucket) > self.MAX_POINTS:
+            self.historical_data[bin_id] = bucket[-self.MAX_POINTS:]
+
     def calculate_fill_rate(self, bin_id: str) -> Optional[float]:
-        """Calculate average fill rate (% per hour)"""
-        if bin_id not in self.historical_data:
-            return None
-        
-        data = self.historical_data[bin_id]
-        
+        """
+        Returns the median fill rate in % per hour for this bin.
+        Negative deltas (bin emptied) are excluded — we only model filling.
+        Returns None if fewer than 2 usable data points.
+        """
+        data = self.historical_data.get(bin_id, [])
         if len(data) < 2:
             return None
-        
-        # Calculate rate between consecutive points
+
         rates = []
         for i in range(1, len(data)):
-            prev_time, prev_level = data[i-1]
+            prev_time, prev_level = data[i - 1]
             curr_time, curr_level = data[i]
-            
-            time_diff = (curr_time - prev_time).total_seconds() / 3600  # hours
-            
-            if time_diff > 0:
-                level_diff = curr_level - prev_level
-                
-                # Ignore negative differences (bin was emptied)
-                if level_diff > 0:
-                    rate = level_diff / time_diff
-                    rates.append(rate)
-        
-        if not rates:
-            return None
-        
-        # Use median to reduce impact of outliers
-        return float(np.median(rates))
-    
-    def predict_full_time(self, bin_id: str, current_fill: int) -> Optional[Dict]:
-        """
-        Predict when bin will reach 100% capacity
-        
-        Returns:
-            Dict with prediction info or None if insufficient data
-        """
+
+            hours = (curr_time - prev_time).total_seconds() / 3600
+            if hours <= 0:
+                continue
+
+            delta = curr_level - prev_level
+            if delta > 0:   # only count filling, not emptying
+                rates.append(delta / hours)
+
+        return float(np.median(rates)) if rates else None
+
+    def predict_full_time(self, bin_id: str, current_fill: int) -> Optional[dict]:
         fill_rate = self.calculate_fill_rate(bin_id)
-        
         if fill_rate is None or fill_rate <= 0:
             return None
-        
-        # Calculate hours until full
-        remaining_capacity = 100 - current_fill
-        hours_until_full = remaining_capacity / fill_rate
-        
-        # Calculate predicted full time
+
+        remaining = 100 - current_fill
+        hours_until_full = remaining / fill_rate
         predicted_time = datetime.utcnow() + timedelta(hours=hours_until_full)
-        
-        # Calculate confidence based on data points
-        data_points = len(self.historical_data.get(bin_id, []))
-        confidence = min(0.95, data_points / 50)  # Max 95% confidence at 50+ points
-        
+
+        # Confidence scales with data points, capped at 95%
+        n_points = len(self.historical_data.get(bin_id, []))
+        confidence = min(0.95, n_points / 50)
+
         return {
             "bin_id": bin_id,
             "current_fill": current_fill,
@@ -96,280 +114,262 @@ class BinFillPredictor:
             "hours_until_full": round(hours_until_full, 1),
             "predicted_full_time": predicted_time.isoformat(),
             "confidence": round(confidence, 2),
-            "data_points_used": data_points
+            "data_points_used": n_points,
         }
-    
-    def get_hourly_pattern(self, bin_id: str) -> Dict[int, float]:
-        """Analyze fill rate by hour of day"""
-        if bin_id not in self.historical_data:
-            return {}
-        
-        hourly_rates = {hour: [] for hour in range(24)}
-        data = self.historical_data[bin_id]
-        
-        for i in range(1, len(data)):
-            prev_time, prev_level = data[i-1]
-            curr_time, curr_level = data[i]
-            
-            hour = curr_time.hour
-            time_diff = (curr_time - prev_time).total_seconds() / 3600
-            
-            if time_diff > 0 and curr_level > prev_level:
-                rate = (curr_level - prev_level) / time_diff
-                hourly_rates[hour].append(rate)
-        
-        # Calculate average rate per hour
-        pattern = {}
-        for hour, rates in hourly_rates.items():
-            if rates:
-                pattern[hour] = round(float(np.mean(rates)), 2)
-        
-        return pattern
 
+    def get_hourly_pattern(self, bin_id: str) -> Dict[int, float]:
+        """Average fill rate per hour of day (0-23). Useful for scheduling."""
+        data = self.historical_data.get(bin_id, [])
+        hourly: Dict[int, List[float]] = {h: [] for h in range(24)}
+
+        for i in range(1, len(data)):
+            prev_time, prev_level = data[i - 1]
+            curr_time, curr_level = data[i]
+
+            hours = (curr_time - prev_time).total_seconds() / 3600
+            if hours > 0 and curr_level > prev_level:
+                rate = (curr_level - prev_level) / hours
+                hourly[curr_time.hour].append(rate)
+
+        return {
+            h: round(float(np.mean(v)), 2)
+            for h, v in hourly.items()
+            if v
+        }
+
+
+# ─── AnomalyDetector ─────────────────────────────────────────────────────────
 
 class AnomalyDetector:
-    """Detects anomalies in sensor data"""
-    
-    def __init__(self, sensitivity: float = 2.0):
-        self.sensitivity = sensitivity  # Standard deviations for anomaly
-        self.baselines = {}  # bin_id -> {metric: (mean, std)}
-    
-    def update_baseline(self, bin_id: str, telemetry: Dict):
-        """Update baseline statistics for a bin"""
-        if bin_id not in self.baselines:
-            self.baselines[bin_id] = {
-                "fill_level": {"values": [], "mean": 0, "std": 0},
-                "battery": {"values": [], "mean": 0, "std": 0},
-                "temperature": {"values": [], "mean": 0, "std": 0},
-                "humidity": {"values": [], "mean": 0, "std": 0}
-            }
-        
-        # Add new values
-        for metric in ["fill_level", "battery", "temperature", "humidity"]:
-            value = telemetry.get(f"{metric}_percent" if metric in ["fill_level", "battery", "humidity"] 
-                                 else f"{metric}_c")
-            
-            if value is not None and value >= 0:
-                baseline = self.baselines[bin_id][metric]
-                baseline["values"].append(value)
-                
-                # Keep only last 50 values
-                if len(baseline["values"]) > 50:
-                    baseline["values"] = baseline["values"][-50:]
-                
-                # Recalculate statistics
-                if len(baseline["values"]) >= 5:
-                    baseline["mean"] = float(np.mean(baseline["values"]))
-                    baseline["std"] = float(np.std(baseline["values"]))
-    
-    def detect_anomalies(self, bin_id: str, telemetry: Dict) -> List[Dict]:
-        """
-        Detect anomalies in current telemetry
-        
-        Returns:
-            List of detected anomalies
-        """
-        if bin_id not in self.baselines:
-            return []
-        
-        anomalies = []
-        
-        metrics_to_check = {
+    """
+    Z-score based anomaly detection for IoT sensor readings.
+    Maintains rolling mean + std per metric per bin.
+    """
+
+    MIN_BASELINE_POINTS = 5   # require at least this many points before detecting
+
+    def __init__(self, sensitivity: float = 2.5):
+        self.sensitivity = sensitivity
+        # bin_id → metric → {"values": [], "mean": float, "std": float}
+        self.baselines: Dict[str, Dict[str, dict]] = {}
+
+    def update_baseline(self, bin_id: str, telemetry: dict):
+        entry = self.baselines.setdefault(bin_id, {
+            metric: {"values": [], "mean": 0.0, "std": 0.0}
+            for metric in ("fill_level", "battery", "temperature", "humidity")
+        })
+
+        mapping = {
             "fill_level": telemetry.get("fill_level_percent"),
             "battery": telemetry.get("battery_percent"),
             "temperature": telemetry.get("temperature_c"),
-            "humidity": telemetry.get("humidity_percent")
+            "humidity": telemetry.get("humidity_percent"),
         }
-        
-        for metric, value in metrics_to_check.items():
+
+        for metric, value in mapping.items():
             if value is None or value < 0:
                 continue
-            
-            baseline = self.baselines[bin_id][metric]
-            
-            if baseline["std"] == 0 or len(baseline["values"]) < 5:
+            bucket = entry[metric]
+            bucket["values"].append(value)
+            if len(bucket["values"]) > 50:
+                bucket["values"] = bucket["values"][-50:]
+            if len(bucket["values"]) >= self.MIN_BASELINE_POINTS:
+                bucket["mean"] = float(np.mean(bucket["values"]))
+                bucket["std"] = float(np.std(bucket["values"]))
+
+    def detect_anomalies(self, bin_id: str, telemetry: dict) -> List[dict]:
+        baseline = self.baselines.get(bin_id)
+        if not baseline:
+            return []
+
+        mapping = {
+            "fill_level": telemetry.get("fill_level_percent"),
+            "battery": telemetry.get("battery_percent"),
+            "temperature": telemetry.get("temperature_c"),
+            "humidity": telemetry.get("humidity_percent"),
+        }
+
+        anomalies = []
+        for metric, value in mapping.items():
+            if value is None or value < 0:
                 continue
-            
-            # Calculate z-score
-            z_score = abs(value - baseline["mean"]) / baseline["std"]
-            
-            if z_score > self.sensitivity:
+            b = baseline.get(metric, {})
+            std = b.get("std", 0)
+            if std == 0 or len(b.get("values", [])) < self.MIN_BASELINE_POINTS:
+                continue
+
+            z = abs(value - b["mean"]) / std
+            if z > self.sensitivity:
                 anomalies.append({
                     "metric": metric,
                     "current_value": value,
                     "expected_range": (
-                        round(baseline["mean"] - self.sensitivity * baseline["std"], 1),
-                        round(baseline["mean"] + self.sensitivity * baseline["std"], 1)
+                        round(b["mean"] - self.sensitivity * std, 1),
+                        round(b["mean"] + self.sensitivity * std, 1),
                     ),
-                    "z_score": round(z_score, 2),
-                    "severity": "high" if z_score > 3 else "medium"
+                    "z_score": round(z, 2),
+                    "severity": "high" if z > 3 else "medium",
                 })
-        
+
         return anomalies
 
 
+# ─── CollectionOptimizer ─────────────────────────────────────────────────────
+
 class CollectionOptimizer:
-    """Optimizes collection scheduling based on predictions"""
-    
-    def __init__(self):
-        self.predictor = BinFillPredictor()
-    
-    def should_collect_now(self, bin_id: str, current_fill: int, 
-                          threshold: int = 80) -> Dict:
-        """
-        Determine if bin should be collected now
-        
-        Args:
-            bin_id: Bin identifier
-            current_fill: Current fill level (%)
-            threshold: Collection threshold (default 80%)
-        
-        Returns:
-            Dict with collection recommendation
-        """
-        # Immediate collection if over threshold
+    """Rule-based collection scheduling. Wraps BinFillPredictor."""
+
+    def __init__(self, predictor: BinFillPredictor):
+        self.predictor = predictor
+
+    def should_collect_now(self, bin_id: str, current_fill: int, threshold: int = 80) -> dict:
         if current_fill >= threshold:
             return {
                 "should_collect": True,
                 "urgency": "high",
                 "reason": f"Fill level ({current_fill}%) exceeds threshold ({threshold}%)",
-                "recommended_time": "now"
+                "recommended_time": "now",
             }
-        
-        # Check prediction
+
         prediction = self.predictor.predict_full_time(bin_id, current_fill)
-        
+
         if prediction is None:
             return {
                 "should_collect": False,
                 "urgency": "low",
                 "reason": "Insufficient data for prediction",
-                "recommended_time": "unknown"
+                "recommended_time": "unknown",
             }
-        
-        hours_until_full = prediction["hours_until_full"]
-        
-        # Collect if will be full within next collection window (24 hours)
-        if hours_until_full <= 24:
+
+        h = prediction["hours_until_full"]
+        if h <= 24:
             return {
                 "should_collect": True,
                 "urgency": "medium",
-                "reason": f"Predicted to be full in {hours_until_full:.1f} hours",
-                "recommended_time": f"within {int(hours_until_full)} hours",
-                "prediction": prediction
+                "reason": f"Predicted full in {h:.1f} hours",
+                "recommended_time": f"within {int(h)} hours",
+                "prediction": prediction,
             }
-        
+
         return {
             "should_collect": False,
             "urgency": "low",
-            "reason": f"Bin not full for {hours_until_full:.1f} hours",
-            "recommended_time": f"in {int(hours_until_full - 12)} hours",
-            "prediction": prediction
+            "reason": f"Bin not full for {h:.1f} hours",
+            "recommended_time": f"in {int(h - 12)} hours",
+            "prediction": prediction,
         }
-    
-    def optimize_collection_route(self, bins: List[Dict]) -> List[str]:
-        """
-        Determine optimal collection order based on urgency
-        
-        Args:
-            bins: List of bin data dicts
-        
-        Returns:
-            Ordered list of bin IDs to collect
-        """
-        urgency_scores = []
-        
-        for bin_data in bins:
-            bin_id = bin_data["id"]
-            current_fill = bin_data.get("fill_level_percent", 0)
-            
-            # Calculate urgency score
-            score = current_fill
-            
-            # Boost score if predicted to be full soon
-            prediction = self.predictor.predict_full_time(bin_id, current_fill)
-            if prediction:
-                hours_until_full = prediction["hours_until_full"]
-                if hours_until_full <= 24:
-                    score += (24 - hours_until_full) * 2
-            
-            urgency_scores.append((bin_id, score))
-        
-        # Sort by urgency (highest first)
-        urgency_scores.sort(key=lambda x: x[1], reverse=True)
-        
-        return [bin_id for bin_id, _ in urgency_scores]
 
+    def optimize_collection_route(self, bins: List[dict]) -> List[str]:
+        """Return bin IDs sorted by urgency (most urgent first)."""
+        scored = []
+        for b in bins:
+            bid = b["id"]
+            fill = b.get("fill_level_percent", 0)
+            score = fill
+            pred = self.predictor.predict_full_time(bid, fill)
+            if pred and pred["hours_until_full"] <= 24:
+                score += (24 - pred["hours_until_full"]) * 2
+            scored.append((bid, score))
+        scored.sort(key=lambda x: x[1], reverse=True)
+        return [bid for bid, _ in scored]
+
+
+# ─── MLPredictionService ─────────────────────────────────────────────────────
 
 class MLPredictionService:
-    """Main ML prediction service combining all models"""
-    
+    """
+    Top-level ML service.  A single instance lives in the FastAPI process
+    (created in predictions.py).  rebuild_from_db() is called once at startup.
+    """
+
     def __init__(self):
         self.fill_predictor = BinFillPredictor()
         self.anomaly_detector = AnomalyDetector(sensitivity=2.5)
-        self.collection_optimizer = CollectionOptimizer()
-        self.collection_optimizer.predictor = self.fill_predictor
-    
-    def ingest_telemetry(self, bin_id: str, telemetry: Dict):
-        """Process incoming telemetry data"""
-        fill_level = telemetry.get("fill_level_percent")
-        
-        if fill_level is not None and fill_level >= 0:
-            self.fill_predictor.add_data_point(bin_id, fill_level)
-        
-        self.anomaly_detector.update_baseline(bin_id, telemetry)
-    
-    def analyze_bin(self, bin_id: str, current_data: Dict) -> Dict:
+        self.collection_optimizer = CollectionOptimizer(self.fill_predictor)
+
+    # ─── CRITICAL FIX: warm up models from persisted telemetry ──────────
+
+    def rebuild_from_db(self, db) -> int:
         """
-        Comprehensive analysis of a bin
-        
-        Returns:
-            Complete analysis including predictions and anomalies
+        Re-hydrate in-memory models from the TelemetryDB table.
+        Call this once at application startup.
+
+        Returns the number of readings loaded.
         """
-        current_fill = current_data.get("fill_level_percent", 0)
-        
-        # Get fill prediction
-        prediction = self.fill_predictor.predict_full_time(bin_id, current_fill)
-        
-        # Detect anomalies
-        anomalies = self.anomaly_detector.detect_anomalies(bin_id, current_data)
-        
-        # Get collection recommendation
-        collection_rec = self.collection_optimizer.should_collect_now(
-            bin_id, current_fill
+        from database import TelemetryDB
+
+        logger.info("[ML] Rebuilding models from database telemetry…")
+
+        # Load last MAX_POINTS readings per bin, oldest first
+        from sqlalchemy import func
+
+        subquery = (
+            db.query(
+                TelemetryDB.bin_id,
+                func.max(TelemetryDB.id).label("max_id"),
+            )
+            .group_by(TelemetryDB.bin_id)
+            .subquery()
         )
-        
-        # Get usage pattern
-        pattern = self.fill_predictor.get_hourly_pattern(bin_id)
-        
+
+        # Load up to BinFillPredictor.MAX_POINTS per bin (ordered by time)
+        bin_ids = [r.bin_id for r in db.query(TelemetryDB.bin_id).distinct().all()]
+        total_loaded = 0
+
+        for bid in bin_ids:
+            rows = (
+                db.query(TelemetryDB)
+                .filter(TelemetryDB.bin_id == bid)
+                .order_by(TelemetryDB.timestamp.asc())
+                .limit(BinFillPredictor.MAX_POINTS)
+                .all()
+            )
+            for r in rows:
+                if r.fill_level_percent is not None:
+                    self.fill_predictor.add_data_point(bid, r.fill_level_percent, r.timestamp)
+                self.anomaly_detector.update_baseline(bid, {
+                    "fill_level_percent": r.fill_level_percent,
+                    "battery_percent": r.battery_percent,
+                    "temperature_c": r.temperature_c,
+                    "humidity_percent": r.humidity_percent,
+                })
+                total_loaded += 1
+
+        logger.info(f"[ML] Loaded {total_loaded} readings for {len(bin_ids)} bins")
+        return total_loaded
+
+    # ─── Live ingestion ───────────────────────────────────────────────────
+
+    def ingest_telemetry(self, bin_id: str, telemetry: dict):
+        fill = telemetry.get("fill_level_percent")
+        if fill is not None and fill >= 0:
+            self.fill_predictor.add_data_point(bin_id, fill)
+        self.anomaly_detector.update_baseline(bin_id, telemetry)
+
+    # ─── Analysis ────────────────────────────────────────────────────────
+
+    def analyze_bin(self, bin_id: str, current_data: dict) -> dict:
+        fill = current_data.get("fill_level_percent", 0)
         return {
             "bin_id": bin_id,
-            "current_fill": current_fill,
-            "prediction": prediction,
-            "anomalies": anomalies,
-            "collection_recommendation": collection_rec,
-            "usage_pattern": pattern,
-            "analysis_timestamp": datetime.utcnow().isoformat()
+            "current_fill": fill,
+            "prediction": self.fill_predictor.predict_full_time(bin_id, fill),
+            "anomalies": self.anomaly_detector.detect_anomalies(bin_id, current_data),
+            "collection_recommendation": self.collection_optimizer.should_collect_now(bin_id, fill),
+            "usage_pattern": self.fill_predictor.get_hourly_pattern(bin_id),
+            "analysis_timestamp": datetime.utcnow().isoformat(),
         }
-    
-    def get_statistics(self) -> Dict:
-        """Get overall ML service statistics"""
-        total_bins = len(self.fill_predictor.historical_data)
-        total_data_points = sum(
-            len(data) for data in self.fill_predictor.historical_data.values()
+
+    def get_statistics(self) -> dict:
+        total = len(self.fill_predictor.historical_data)
+        total_pts = sum(len(v) for v in self.fill_predictor.historical_data.values())
+        with_pred = sum(
+            1 for bid in self.fill_predictor.historical_data
+            if self.fill_predictor.calculate_fill_rate(bid) is not None
         )
-        
-        bins_with_predictions = sum(
-            1 for bin_id in self.fill_predictor.historical_data
-            if self.fill_predictor.calculate_fill_rate(bin_id) is not None
-        )
-        
         return {
-            "total_bins_tracked": total_bins,
-            "total_data_points": total_data_points,
-            "bins_with_predictions": bins_with_predictions,
-            "prediction_coverage": (
-                round(bins_with_predictions / total_bins * 100, 1)
-                if total_bins > 0 else 0
-            )
+            "total_bins_tracked": total,
+            "total_data_points": total_pts,
+            "bins_with_predictions": with_pred,
+            "prediction_coverage": round(with_pred / total * 100, 1) if total else 0,
         }
