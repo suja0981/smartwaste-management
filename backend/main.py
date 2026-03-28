@@ -35,17 +35,40 @@ async def lifespan(app: FastAPI):
     """
     Replaces the deprecated @app.on_event("startup") / ("shutdown") pattern.
 
-    On startup: warm up ML models from persisted telemetry so predictions
-    work immediately after a restart instead of waiting for the next IoT cycle.
+    On startup:
+      1. Warm up ML models from persisted telemetry so predictions work
+         immediately after a restart instead of waiting for the next IoT cycle.
+      2. Prune expired rows from the token blacklist table. Without cleanup
+         the table grows forever — expired tokens fail JWT validation anyway,
+         so there is no security benefit in keeping them.
     """
+    db = SessionLocal()
     try:
-        from routers.predictions import ml_service
-        db = SessionLocal()
-        n = ml_service.rebuild_from_db(db)
+        # ── ML warm-up ────────────────────────────────────────────────────────
+        try:
+            from routers.predictions import ml_service
+            n = ml_service.rebuild_from_db(db)
+            logger.info(f"[startup] ML models warmed up with {n} telemetry readings")
+        except Exception as e:
+            logger.warning(f"[startup] ML warm-up failed (non-fatal): {e}")
+
+        # ── Token blacklist pruning ────────────────────────────────────────────
+        try:
+            from datetime import datetime, timezone
+            from database import TokenBlacklistDB
+            cutoff = datetime.now(timezone.utc)
+            deleted = (
+                db.query(TokenBlacklistDB)
+                .filter(TokenBlacklistDB.expires_at < cutoff)
+                .delete(synchronize_session=False)
+            )
+            db.commit()
+            if deleted:
+                logger.info(f"[startup] Pruned {deleted} expired token blacklist entries")
+        except Exception as e:
+            logger.warning(f"[startup] Blacklist pruning failed (non-fatal): {e}")
+    finally:
         db.close()
-        logger.info(f"[startup] ML models warmed up with {n} telemetry readings")
-    except Exception as e:
-        logger.warning(f"[startup] ML warm-up failed (non-fatal): {e}")
 
     yield  # application runs here
 

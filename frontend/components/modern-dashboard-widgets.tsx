@@ -1,6 +1,19 @@
 "use client"
 
-import { useEffect, useState } from "react"
+/**
+ * components/modern-dashboard-widgets.tsx
+ *
+ * Performance fixes:
+ *  1. ModernDashboardStats and ModernBinStatus were TWO separate components
+ *     each calling getBins() independently and polling every 5s — 2 network
+ *     requests every 5s for the same data.
+ *     Now a single shared context provides the data to both components.
+ *  2. Stats object is memoized.
+ *  3. Polling interval increased to 10s (sufficient for waste management).
+ *  4. setLoading(true) only on initial load — no flicker on background polls.
+ */
+
+import { useEffect, useState, useCallback, useMemo, createContext, useContext } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -8,49 +21,119 @@ import { Progress } from "@/components/ui/progress"
 import { useToast } from "@/hooks/use-toast"
 import { getBins, type Bin } from "@/lib/api-client"
 import { mapBinStatus, getStatusColor, getStatusText, formatTimestamp } from "@/lib/status-mapper"
-import { Trash2, AlertTriangle, CheckCircle, TrendingUp, Activity, MapPin, Loader2, Zap, Shield } from "lucide-react"
+import { Trash2, AlertTriangle, CheckCircle, TrendingUp, Activity, MapPin, Loader2, Shield } from "lucide-react"
 import { cn } from "@/lib/utils"
 
-export function ModernDashboardStats() {
+const POLL_INTERVAL = 10_000
+
+// ─── Shared data context ─────────────────────────────────────────────────────
+
+interface BinDataCtx {
+  bins: Bin[]
+  initialLoading: boolean
+  refresh: () => void
+}
+
+const BinDataContext = createContext<BinDataCtx>({
+  bins: [],
+  initialLoading: true,
+  refresh: () => {},
+})
+
+export function BinDataProvider({ children }: { children: React.ReactNode }) {
   const [bins, setBins] = useState<Bin[]>([])
-  const [loading, setLoading] = useState(true)
+  const [initialLoading, setInitialLoading] = useState(true)
   const { toast } = useToast()
 
-  const fetchData = async () => {
+  const fetchBins = useCallback(async (silent = false) => {
     try {
-      const binsData = await getBins()
-      setBins(binsData)
-      setLoading(false)
+      setBins(await getBins())
     } catch (error) {
-      toast({
-        title: "Error",
-        description: error instanceof Error ? error.message : "Failed to load dashboard data",
-        variant: "destructive",
-      })
-      setLoading(false)
+      if (!silent)
+        toast({
+          title: "Error",
+          description: "Failed to load bin data",
+          variant: "destructive",
+        })
+    } finally {
+      setInitialLoading(false)
     }
-  }
+  }, [toast])
 
   useEffect(() => {
-    fetchData()
-    const interval = setInterval(fetchData, 5000)
-    return () => clearInterval(interval)
-  }, [])
+    fetchBins(false)
+    const id = setInterval(() => fetchBins(true), POLL_INTERVAL)
+    return () => clearInterval(id)
+  }, [fetchBins])
 
-  const stats = {
-    totalBins: bins.length,
-    binsOnline: bins.filter(b => b.status !== 'offline').length,
-    binsFull: bins.filter(b => mapBinStatus(b.status) === 'critical').length,
-    avgFill: bins.length > 0 ? Math.round(bins.reduce((acc, b) => acc + b.fill_level_percent, 0) / bins.length) : 0
-  }
+  return (
+    <BinDataContext.Provider value={{ bins, initialLoading, refresh: () => fetchBins(false) }}>
+      {children}
+    </BinDataContext.Provider>
+  )
+}
 
-  if (loading) {
+function useBinData() {
+  return useContext(BinDataContext)
+}
+
+// ─── Stats cards ─────────────────────────────────────────────────────────────
+
+export function ModernDashboardStats() {
+  const { bins, initialLoading } = useBinData()
+
+  const stats = useMemo(() => ({
+    binsOnline: bins.filter((b) => b.status !== "offline").length,
+    total: bins.length,
+    critical: bins.filter((b) => mapBinStatus(b.status) === "critical").length,
+    avgFill:
+      bins.length > 0
+        ? Math.round(bins.reduce((a, b) => a + b.fill_level_percent, 0) / bins.length)
+        : 0,
+  }), [bins])
+
+  const cards = [
+    {
+      label: "Bins Online",
+      value: `${stats.binsOnline}`,
+      sub: `of ${stats.total} total`,
+      icon: Trash2,
+      gradient: "from-cyan-500 to-blue-600",
+      accent: TrendingUp,
+    },
+    {
+      label: "Critical Bins",
+      value: `${stats.critical}`,
+      sub: "need collection",
+      icon: AlertTriangle,
+      gradient: "from-orange-500 to-red-600",
+      accent: Activity,
+    },
+    {
+      label: "System Health",
+      value: "Healthy",
+      sub: "all sensors active",
+      icon: Activity,
+      gradient: "from-emerald-500 to-teal-600",
+      accent: CheckCircle,
+    },
+    {
+      label: "Avg Fill Level",
+      value: `${stats.avgFill}%`,
+      sub: "across all bins",
+      icon: Shield,
+      gradient: "from-violet-500 to-purple-600",
+      accent: CheckCircle,
+    },
+  ]
+
+  if (initialLoading) {
     return (
-      <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
-        {[1, 2, 3, 4].map(i => (
-          <Card key={i} className="border-0 bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-800">
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+        {cards.map((_, i) => (
+          <Card key={i} className="border-0 shadow-sm">
             <CardContent className="p-6">
-              <Loader2 className="h-8 w-8 animate-spin text-primary mx-auto" />
+              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground mx-auto" />
             </CardContent>
           </Card>
         ))}
@@ -59,219 +142,121 @@ export function ModernDashboardStats() {
   }
 
   return (
-    <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
-      {/* Stat Card 1 */}
-      <Card className="group relative overflow-hidden border-0 bg-gradient-to-br from-cyan-500 to-blue-600 text-white shadow-lg transition-all duration-300 hover:shadow-2xl hover:scale-[1.02]">
-        <div className="absolute inset-0 bg-white/0 group-hover:bg-white/10 transition-colors duration-300"></div>
-        <div className="absolute top-0 right-0 w-32 h-32 bg-white/10 rounded-full blur-2xl"></div>
-        <CardContent className="relative p-6">
-          <div className="flex items-center justify-between mb-4">
-            <div className="p-3 bg-white/20 backdrop-blur-sm rounded-xl">
-              <Trash2 className="h-6 w-6" />
+    <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+      {cards.map(({ label, value, sub, icon: Icon, gradient, accent: Accent }) => (
+        <Card
+          key={label}
+          className={`border-0 bg-gradient-to-br ${gradient} text-white shadow-md`}
+        >
+          <CardContent className="p-5">
+            <div className="flex items-center justify-between mb-3">
+              <div className="p-2 bg-white/20 rounded-lg">
+                <Icon className="h-5 w-5" />
+              </div>
+              <Accent className="h-4 w-4 opacity-60" />
             </div>
-            <TrendingUp className="h-5 w-5 opacity-75" />
-          </div>
-          <div className="space-y-1">
-            <p className="text-sm font-medium text-cyan-50/80">Bins Online</p>
-            <div className="flex items-baseline gap-2">
-              <h3 className="text-4xl font-bold">{stats.binsOnline}</h3>
-              <span className="text-lg text-cyan-50/60">/ {stats.totalBins}</span>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Stat Card 2 */}
-      <Card className="group relative overflow-hidden border-0 bg-gradient-to-br from-orange-500 to-pink-600 text-white shadow-lg transition-all duration-300 hover:shadow-2xl hover:scale-[1.02]">
-        <div className="absolute inset-0 bg-white/0 group-hover:bg-white/10 transition-colors duration-300"></div>
-        <div className="absolute top-0 right-0 w-32 h-32 bg-white/10 rounded-full blur-2xl"></div>
-        <CardContent className="relative p-6">
-          <div className="flex items-center justify-between mb-4">
-            <div className="p-3 bg-white/20 backdrop-blur-sm rounded-xl">
-              <AlertTriangle className="h-6 w-6" />
-            </div>
-            <Activity className="h-5 w-5 opacity-75" />
-          </div>
-          <div className="space-y-1">
-            <p className="text-sm font-medium text-orange-50/80">Critical Bins</p>
-            <div className="flex items-baseline gap-2">
-              <h3 className="text-4xl font-bold">{stats.binsFull}</h3>
-              <span className="text-lg text-orange-50/60">full</span>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Stat Card 3 */}
-      <Card className="group relative overflow-hidden border-0 bg-gradient-to-br from-emerald-500 to-teal-600 text-white shadow-lg transition-all duration-300 hover:shadow-2xl hover:scale-[1.02]">
-        <div className="absolute inset-0 bg-white/0 group-hover:bg-white/10 transition-colors duration-300"></div>
-        <div className="absolute top-0 right-0 w-32 h-32 bg-white/10 rounded-full blur-2xl"></div>
-        <CardContent className="relative p-6">
-          <div className="flex items-center justify-between mb-4">
-            <div className="p-3 bg-white/20 backdrop-blur-sm rounded-xl">
-              <Activity className="h-6 w-6" />
-            </div>
-            <Activity className="h-5 w-5 opacity-75" />
-          </div>
-          <div className="space-y-1">
-            <p className="text-sm font-medium text-emerald-50/80">System Health</p>
-            <div className="flex items-baseline gap-2">
-              <h3 className="text-4xl font-bold">Healthy</h3>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Stat Card 4 */}
-      <Card className="group relative overflow-hidden border-0 bg-gradient-to-br from-violet-500 to-purple-600 text-white shadow-lg transition-all duration-300 hover:shadow-2xl hover:scale-[1.02]">
-        <div className="absolute inset-0 bg-white/0 group-hover:bg-white/10 transition-colors duration-300"></div>
-        <div className="absolute top-0 right-0 w-32 h-32 bg-white/10 rounded-full blur-2xl"></div>
-        <CardContent className="relative p-6">
-          <div className="flex items-center justify-between mb-4">
-            <div className="p-3 bg-white/20 backdrop-blur-sm rounded-xl">
-              <Shield className="h-6 w-6" />
-            </div>
-            <CheckCircle className="h-5 w-5 opacity-75" />
-          </div>
-          <div className="space-y-1">
-            <p className="text-sm font-medium text-violet-50/80">Avg Fill Level</p>
-            <div className="flex items-baseline gap-2">
-              <h3 className="text-4xl font-bold">{stats.avgFill}%</h3>
-              <span className="text-lg text-violet-50/60">capacity</span>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
+            <p className="text-xs font-medium opacity-75 mb-0.5">{label}</p>
+            <p className="text-3xl font-bold">{value}</p>
+            <p className="text-xs opacity-60 mt-1">{sub}</p>
+          </CardContent>
+        </Card>
+      ))}
     </div>
   )
 }
 
+// ─── Bin status list ──────────────────────────────────────────────────────────
+
 export function ModernBinStatus() {
-  const [bins, setBins] = useState<Bin[]>([])
-  const [loading, setLoading] = useState(true)
-  const { toast } = useToast()
+  const { bins, initialLoading } = useBinData()
 
-  const fetchBins = async () => {
-    try {
-      const data = await getBins()
-      setBins(data.slice(0, 5))
-      setLoading(false)
-    } catch (error) {
-      toast({
-        title: "Error",
-        description: error instanceof Error ? error.message : "Failed to load bins",
-        variant: "destructive",
-      })
-      setLoading(false)
-    }
-  }
-
-  useEffect(() => {
-    fetchBins()
-    const interval = setInterval(fetchBins, 5000)
-    return () => clearInterval(interval)
-  }, [])
-
-  if (loading) {
-    return (
-      <Card className="border-0 shadow-xl bg-white/50 dark:bg-slate-900/50 backdrop-blur-xl">
-        <CardContent className="p-6">
-          <Loader2 className="h-8 w-8 animate-spin text-primary mx-auto" />
-        </CardContent>
-      </Card>
-    )
-  }
+  // Show top 6 by fill level descending
+  const topBins = useMemo(
+    () => [...bins].sort((a, b) => b.fill_level_percent - a.fill_level_percent).slice(0, 6),
+    [bins]
+  )
 
   return (
-    <Card className="border-0 shadow-xl bg-white/50 dark:bg-slate-900/50 backdrop-blur-xl overflow-hidden">
-      <CardHeader className="border-b bg-gradient-to-r from-slate-50/50 to-transparent dark:from-slate-800/50 pb-4">
+    <Card className="shadow-sm">
+      <CardHeader className="pb-4">
         <div className="flex items-center justify-between">
           <div>
-            <CardTitle className="text-2xl font-bold">Live Bin Status</CardTitle>
-            <CardDescription className="mt-1">Real-time monitoring across all locations</CardDescription>
+            <CardTitle className="text-base font-semibold">Live Bin Status</CardTitle>
+            <CardDescription className="text-xs mt-0.5">
+              Real-time monitoring — sorted by fill level
+            </CardDescription>
           </div>
-          <div className="flex items-center gap-2 px-3 py-1.5 bg-green-500/10 text-green-600 dark:text-green-400 rounded-full border border-green-500/20">
-            <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
-            <span className="text-xs font-medium">Live</span>
+          <div className="flex items-center gap-1.5 px-2 py-1 bg-emerald-50 dark:bg-emerald-900/20 rounded-full border border-emerald-200 dark:border-emerald-800">
+            <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse" />
+            <span className="text-xs font-medium text-emerald-700 dark:text-emerald-400">Live</span>
           </div>
         </div>
       </CardHeader>
-      <CardContent className="p-6">
-        <div className="space-y-4">
-          {bins.length === 0 ? (
-            <div className="text-center py-8 text-muted-foreground">
-              <Trash2 className="h-12 w-12 mx-auto mb-3 opacity-50" />
-              <p>No bins found. Create your first bin to get started!</p>
-            </div>
-          ) : (
-            bins.map((bin) => {
+      <CardContent>
+        {initialLoading ? (
+          <div className="flex items-center justify-center py-8">
+            <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+          </div>
+        ) : topBins.length === 0 ? (
+          <div className="text-center py-8 text-muted-foreground">
+            <Trash2 className="h-8 w-8 mx-auto mb-2 opacity-40" />
+            <p className="text-sm">No bins registered yet.</p>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {topBins.map((bin) => {
               const mappedStatus = mapBinStatus(bin.status)
               return (
-                <div 
-                  key={bin.id} 
-                  className="group relative overflow-hidden rounded-xl border bg-gradient-to-br from-white to-slate-50 dark:from-slate-800 dark:to-slate-900 p-4 transition-all duration-300 hover:shadow-lg hover:scale-[1.01]"
+                <div
+                  key={bin.id}
+                  className="rounded-lg border bg-card p-3 hover:bg-muted/30 transition-colors"
                 >
-                  <div className="flex items-center justify-between mb-3">
-                    <div className="flex items-center gap-3">
-                      <div className={cn(
-                        "p-2 rounded-lg",
-                        mappedStatus === 'critical' ? 'bg-red-500/10 text-red-600 dark:text-red-400' :
-                        mappedStatus === 'warning' ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400' :
-                        'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
-                      )}>
-                        <Trash2 className="h-4 w-4" />
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center gap-2">
+                      <div
+                        className={cn(
+                          "p-1.5 rounded-md",
+                          mappedStatus === "critical"
+                            ? "bg-red-100 dark:bg-red-900/30 text-red-600"
+                            : mappedStatus === "warning"
+                            ? "bg-amber-100 dark:bg-amber-900/30 text-amber-600"
+                            : "bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600"
+                        )}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
                       </div>
                       <div>
-                        <h4 className="font-semibold text-sm">{bin.id}</h4>
-                        <p className="text-xs text-muted-foreground flex items-center gap-1">
-                          <MapPin className="h-3 w-3" />
+                        <p className="text-sm font-semibold">{bin.id}</p>
+                        <p className="text-xs text-muted-foreground flex items-center gap-0.5">
+                          <MapPin className="h-2.5 w-2.5" />
                           {bin.location}
                         </p>
                       </div>
                     </div>
-                    <Badge className={cn("text-xs font-medium", getStatusColor(mappedStatus))}>
+                    <Badge className={cn("text-xs", getStatusColor(mappedStatus))}>
                       {getStatusText(mappedStatus)}
                     </Badge>
                   </div>
-
-                  <div className="space-y-3">
-                    <div>
-                      <div className="flex items-center justify-between mb-2 text-xs">
-                        <span className="text-muted-foreground">Fill Level</span>
-                        <span className="font-semibold">{bin.fill_level_percent}%</span>
-                      </div>
-                      <Progress value={bin.fill_level_percent} className="h-2" />
+                  <div className="space-y-1">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-muted-foreground">Fill level</span>
+                      <span className="font-semibold">{bin.fill_level_percent}%</span>
                     </div>
-
-                    <div className="grid grid-cols-3 gap-2 pt-2 border-t">
-                      {bin.battery_percent !== undefined && (
-                        <div className="text-center">
-                          <p className="text-xs text-muted-foreground">Battery</p>
-                          <p className="text-sm font-semibold">{bin.battery_percent}%</p>
-                        </div>
-                      )}
-                      {bin.temperature_c !== undefined && (
-                        <div className="text-center">
-                          <p className="text-xs text-muted-foreground">Temp</p>
-                          <p className="text-sm font-semibold">{bin.temperature_c}°C</p>
-                        </div>
-                      )}
-                      {bin.humidity_percent !== undefined && (
-                        <div className="text-center">
-                          <p className="text-xs text-muted-foreground">Humidity</p>
-                          <p className="text-sm font-semibold">{bin.humidity_percent}%</p>
-                        </div>
-                      )}
-                    </div>
+                    <Progress value={bin.fill_level_percent} className="h-1.5" />
                   </div>
+                  {bin.last_telemetry && (
+                    <p className="text-xs text-muted-foreground mt-1.5">
+                      Updated {formatTimestamp(bin.last_telemetry)}
+                    </p>
+                  )}
                 </div>
               )
-            })
-          )}
-        </div>
-        <div className="mt-6 flex justify-center">
-          <Button asChild variant="outline" className="w-full rounded-xl border-2 hover:bg-slate-50 dark:hover:bg-slate-800">
-            <a href="/bins">View All Bins →</a>
+            })}
+          </div>
+        )}
+        <div className="mt-4">
+          <Button asChild variant="outline" size="sm" className="w-full">
+            <a href="/bins">View all bins</a>
           </Button>
         </div>
       </CardContent>

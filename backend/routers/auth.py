@@ -6,9 +6,15 @@ Phase 3 additions:
   DELETE /auth/device-token  unregister on logout / token refresh
 
 All other endpoints unchanged from Phase 2.
+
+Fixes applied:
+  - get_device_or_user: added token revocation (blacklist) check on JWT path.
+    Previously a logged-out admin JWT still authenticated IoT telemetry.
+  - All datetime.utcnow() replaced with datetime.now(timezone.utc)
+    (utcnow() is deprecated in Python 3.12+).
 """
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional, List
 import uuid
 
@@ -62,6 +68,10 @@ class DeviceTokenRequest(BaseModel):
 
 # ─── Internal helpers ─────────────────────────────────────────────────────────
 
+def _now() -> datetime:
+    """Current UTC time. Uses timezone-aware datetime (utcnow() is deprecated)."""
+    return datetime.now(timezone.utc)
+
 def _hash_password(password: str) -> str:
     return pwd_context.hash(password)
 
@@ -69,31 +79,34 @@ def _verify_password(plain: str, hashed: str) -> bool:
     return pwd_context.verify(plain, hashed)
 
 def _create_jwt(email: str, role: str, token_type: str = "access") -> str:
+    now = _now()
     expire = (
-        datetime.utcnow() + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
+        now + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
         if token_type == "refresh"
-        else datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+        else now + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     )
     payload = {
         "sub": email,
         "role": role,
         "exp": expire,
-        "iat": datetime.utcnow(),
+        "iat": now,
         "jti": str(uuid.uuid4()),
         "type": token_type,
     }
     return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
 
 def _is_token_revoked(token_jti: str, db: Session) -> bool:
-    return db.query(TokenBlacklistDB).filter(
-        TokenBlacklistDB.token_jti == token_jti
-    ).first() is not None
+    return (
+        db.query(TokenBlacklistDB)
+        .filter(TokenBlacklistDB.token_jti == token_jti)
+        .first()
+    ) is not None
 
 def _revoke_token(token_jti: str, email: str, expires_at: datetime, db: Session) -> None:
     db.add(TokenBlacklistDB(
         token_jti=token_jti,
         email=email,
-        revoked_at=datetime.utcnow(),
+        revoked_at=_now(),
         expires_at=expires_at,
     ))
     db.commit()
@@ -127,7 +140,7 @@ def _upsert_firebase_user(decoded_token: dict, db: Session) -> UserDB:
             hashed_password=None,
             role="user",
             is_active=True,
-            created_at=datetime.utcnow(),
+            created_at=_now(),
             firebase_uid=firebase_uid,
             auth_provider=provider,
         )
@@ -191,6 +204,15 @@ def get_device_or_user(
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(http_bearer),
     db: Session = Depends(get_db),
 ) -> dict:
+    """
+    Dual-auth dependency for the telemetry endpoint.
+
+    - IoT devices supply  X-API-Key: wsk_live_<key>
+    - Admins/testers supply  Authorization: Bearer <access_jwt>
+
+    FIX: The JWT path now checks the token blacklist so a logged-out
+    admin token can no longer authenticate telemetry ingestion.
+    """
     if api_key:
         record = verify_api_key(api_key, db)
         if record:
@@ -201,10 +223,18 @@ def get_device_or_user(
         try:
             payload = jwt.decode(credentials.credentials, SECRET_KEY, algorithms=[ALGORITHM])
             email = payload.get("sub")
+            token_type = payload.get("type", "access")
+            jti = payload.get("jti")
+
+            if token_type != "access":
+                raise ValueError("Not an access token")
+            if jti and _is_token_revoked(jti, db):
+                raise HTTPException(status_code=401, detail="Token has been revoked")
+
             user = db.query(UserDB).filter(UserDB.email == email).first()
             if user and user.is_active:
                 return {"type": "user", "identity": user, "label": user.email}
-        except JWTError:
+        except (JWTError, ValueError):
             pass
 
     raise HTTPException(
@@ -229,7 +259,7 @@ def signup(user_data: UserRegister, db: Session = Depends(get_db)):
         hashed_password=_hash_password(user_data.password),
         role="user",
         is_active=True,
-        created_at=datetime.utcnow(),
+        created_at=_now(),
         auth_provider="local",
     )
     db.add(user)
@@ -305,7 +335,7 @@ def logout(
         jti = payload.get("jti")
         exp = payload.get("exp")
         if jti:
-            exp_datetime = datetime.utcfromtimestamp(exp) if exp else None
+            exp_datetime = datetime.fromtimestamp(exp, tz=timezone.utc) if exp else None
             _revoke_token(jti, current_user.email, exp_datetime, db)
     except JWTError:
         pass
@@ -369,10 +399,7 @@ def unregister_device_token(
     current_user: UserDB = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """
-    Unregister an FCM device token.
-    Call on logout or when the app is uninstalled.
-    """
+    """Unregister an FCM device token. Call on logout or app uninstall."""
     from services.notifications import unregister_device_token as _unregister
     removed = _unregister(body.token, db)
     return {"unregistered": removed}
