@@ -13,6 +13,7 @@ import { cn } from "@/lib/utils"
 import { usePathname, useRouter } from "next/navigation"
 import { Route } from "lucide-react"
 import { useAuth } from "@/contexts/auth-context"
+import Link from "next/link"
 
 
 const navigation = [
@@ -35,8 +36,8 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
   const router = useRouter()
   const { user, logout, isAdmin } = useAuth()
 
-  const handleLogout = () => {
-    logout()
+  const handleLogout = async () => {
+    await logout()
     router.push('/login')
   }
 
@@ -71,7 +72,7 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
             </div>
             <nav className="flex-1 space-y-1 px-3 py-4">
               {navigation.map((item) => (
-                <a
+                <Link
                   key={item.name}
                   href={item.href}
                   className={cn(
@@ -83,7 +84,7 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
                 >
                   <item.icon className="mr-3 h-5 w-5" />
                   {item.name}
-                </a>
+                </Link>
               ))}
             </nav>
           </div>
@@ -105,7 +106,7 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
           </div>
           <nav className="flex-1 space-y-1 px-3 py-4">
             {navigation.map((item) => (
-              <a
+              <Link
                 key={item.name}
                 href={item.href}
                 className={cn(
@@ -117,7 +118,7 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
               >
                 <item.icon className="mr-3 h-5 w-5" />
                 {item.name}
-              </a>
+              </Link>
             ))}
           </nav>
 

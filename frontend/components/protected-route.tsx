@@ -1,6 +1,6 @@
 'use client'
 
-import { ReactNode } from 'react'
+import { ReactNode, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { useAuth } from '@/contexts/auth-context'
 import { Card } from '@/components/ui/card'
@@ -8,6 +8,12 @@ import { Card } from '@/components/ui/card'
 export function ProtectedRoute({ children }: { children: ReactNode }) {
     const { isAuthenticated, isLoading } = useAuth()
     const router = useRouter()
+
+    useEffect(() => {
+        if (!isLoading && !isAuthenticated) {
+            router.replace('/login')
+        }
+    }, [isAuthenticated, isLoading, router])
 
     if (isLoading) {
         return (
@@ -23,7 +29,6 @@ export function ProtectedRoute({ children }: { children: ReactNode }) {
     }
 
     if (!isAuthenticated) {
-        router.push('/login')
         return null
     }
 
@@ -34,6 +39,12 @@ export function AdminOnlyRoute({ children }: { children: ReactNode }) {
     const { isAdmin, isLoading, isAuthenticated } = useAuth()
     const router = useRouter()
 
+    useEffect(() => {
+        if (!isLoading && !isAuthenticated) {
+            router.replace('/login')
+        }
+    }, [isAuthenticated, isLoading, router])
+
     if (isLoading) {
         return (
             <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-blue-50 to-indigo-50">
@@ -48,7 +59,6 @@ export function AdminOnlyRoute({ children }: { children: ReactNode }) {
     }
 
     if (!isAuthenticated) {
-        router.push('/login')
         return null
     }
 

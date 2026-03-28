@@ -13,7 +13,9 @@
  * In development, PWA is disabled to avoid cache confusion.
  */
 
-const withPWA = require("next-pwa")({
+import nextPwa from "next-pwa";
+
+const withPWA = nextPwa({
   dest: "public",
   disable: process.env.NODE_ENV === "development",
   register: true,
@@ -58,4 +60,4 @@ const nextConfig = {
   },
 };
 
-module.exports = withPWA(nextConfig);
+export default withPWA(nextConfig);

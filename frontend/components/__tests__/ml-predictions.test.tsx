@@ -42,10 +42,10 @@ describe('MLPredictions', () => {
 
     beforeEach(() => {
         jest.clearAllMocks()
-            ; (useToast as jest.Mock).mockReturnValue({
-                toast: jest.fn(),
-            })
-            ; (apiClient.analyzeBin as jest.Mock).mockResolvedValue(mockAnalysis)
+        ;(useToast as jest.Mock).mockReturnValue({
+            toast: jest.fn(),
+        })
+        ;(apiClient.analyzeBin as jest.Mock).mockResolvedValue(mockAnalysis)
     })
 
     it('should render fill level prediction card', async () => {
@@ -116,7 +116,7 @@ describe('MLPredictions', () => {
             ],
         }
 
-            ; (apiClient.analyzeBin as jest.Mock).mockResolvedValue(analysisWithAnomalies)
+        ;(apiClient.analyzeBin as jest.Mock).mockResolvedValue(analysisWithAnomalies)
 
         render(<MLPredictions binId="bin1" />)
 
@@ -138,7 +138,7 @@ describe('MLPredictions', () => {
             },
         }
 
-            ; (apiClient.analyzeBin as jest.Mock).mockResolvedValue(analysisNoCollection)
+        ;(apiClient.analyzeBin as jest.Mock).mockResolvedValue(analysisNoCollection)
 
         render(<MLPredictions binId="bin1" />)
 
@@ -150,10 +150,10 @@ describe('MLPredictions', () => {
 
     it('should display error on API failure', async () => {
         const mockToast = jest.fn()
-            ; (useToast as jest.Mock).mockReturnValue({
-                toast: mockToast,
-            })
-            ; (apiClient.analyzeBin as jest.Mock).mockRejectedValue(new Error('API Error'))
+        ;(useToast as jest.Mock).mockReturnValue({
+            toast: mockToast,
+        })
+        ;(apiClient.analyzeBin as jest.Mock).mockRejectedValue(new Error('API Error'))
 
         render(<MLPredictions binId="bin1" />)
 
@@ -170,8 +170,7 @@ describe('MLPredictions', () => {
     it('should show loading state initially', () => {
         render(<MLPredictions binId="bin1" />)
 
-        // Loading indicator should be present
-        expect(screen.getByRole('img', { hidden: true })).toBeInTheDocument()
+        expect(document.querySelector('.animate-spin')).toBeInTheDocument()
     })
 
     it('should pass correct binId to analyzeBin', async () => {

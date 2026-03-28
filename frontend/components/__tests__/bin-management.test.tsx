@@ -35,10 +35,10 @@ describe('BinManagementIntegrated', () => {
 
     beforeEach(() => {
         jest.clearAllMocks()
-            ; (useToast as jest.Mock).mockReturnValue({
-                toast: jest.fn(),
-            })
-            ; (apiClient.getBins as jest.Mock).mockResolvedValue(mockBins)
+        ;(useToast as jest.Mock).mockReturnValue({
+            toast: jest.fn(),
+        })
+        ;(apiClient.getBins as jest.Mock).mockResolvedValue(mockBins)
     })
 
     it('should render the component title', async () => {
@@ -75,7 +75,7 @@ describe('BinManagementIntegrated', () => {
             expect(screen.getByText('bin1')).toBeInTheDocument()
         })
 
-        const searchInput = screen.getByRole('textbox', { name: /search/i })
+        const searchInput = screen.getByPlaceholderText('Search bins...')
         fireEvent.change(searchInput, { target: { value: 'Park' } })
 
         await waitFor(() => {
@@ -86,11 +86,11 @@ describe('BinManagementIntegrated', () => {
 
     it('should display error message on API failure', async () => {
         const errorMessage = 'Failed to load bins'
-            ; (apiClient.getBins as jest.Mock).mockRejectedValue(new Error(errorMessage))
+        ;(apiClient.getBins as jest.Mock).mockRejectedValue(new Error(errorMessage))
         const mockToast = jest.fn()
-            ; (useToast as jest.Mock).mockReturnValue({
-                toast: mockToast,
-            })
+        ;(useToast as jest.Mock).mockReturnValue({
+            toast: mockToast,
+        })
 
         render(<BinManagementIntegrated />)
 
@@ -107,8 +107,7 @@ describe('BinManagementIntegrated', () => {
     it('should display loading state initially', () => {
         render(<BinManagementIntegrated />)
 
-        // Should show loader initially
-        expect(screen.getByRole('img', { hidden: true })).toBeInTheDocument()
+        expect(document.querySelector('.animate-spin')).toBeInTheDocument()
     })
 
     it('should call getBins at regular intervals', async () => {

@@ -1,81 +1,92 @@
 """
-Populate the database with realistic test data for demonstration.
-Run this to quickly set up a demo environment.
+populate_test_data.py — Seed the database with realistic demo data.
+
+Run this after starting the backend to quickly set up a demo environment:
+  python populate_test_data.py
+
+What it does:
+  1. Creates 15 bins across Nagpur with real coordinates
+  2. Creates 3 collection crews
+  3. Creates 3 sample tasks
+  4. Optimizes and saves 3 demo routes
+  5. Sends telemetry for the first 10 bins
+  6. Prints a summary of current system stats
+
+NOTE: Telemetry requires auth. Set IOT_API_KEY or IOT_BEARER_TOKEN in your
+environment before running, otherwise the telemetry step will be skipped.
 """
 
+import os
 import requests
 import random
-from datetime import datetime, timedelta
 
 API_BASE = "http://localhost:8000"
 
-# Nagpur locations with real coordinates
+# Auth for telemetry (requires X-API-Key or Bearer token)
+_API_KEY = os.getenv("IOT_API_KEY", "")
+_BEARER_TOKEN = os.getenv("IOT_BEARER_TOKEN", "")
+
 NAGPUR_LOCATIONS = [
-    {"name": "Sitabuldi Main Square", "lat": 21.1497, "lon": 79.0860},
-    {"name": "Dharampeth Church Square", "lat": 21.1346, "lon": 79.0669},
-    {"name": "Sadar Bazaar", "lat": 21.1520, "lon": 79.0877},
-    {"name": "Railway Station", "lat": 21.1520, "lon": 79.0850},
-    {"name": "Civil Lines", "lat": 21.1575, "lon": 79.0746},
-    {"name": "Empress Mall", "lat": 21.1456, "lon": 79.0883},
-    {"name": "Gandhi Sagar Lake", "lat": 21.1389, "lon": 79.0921},
-    {"name": "Futala Lake", "lat": 21.1261, "lon": 79.0583},
-    {"name": "Ambazari Lake", "lat": 21.1124, "lon": 79.0333},
-    {"name": "Kasturchand Park", "lat": 21.1508, "lon": 79.0904},
-    {"name": "Variety Square", "lat": 21.1469, "lon": 79.0846},
-    {"name": "Shankar Nagar Square", "lat": 21.1175, "lon": 79.0745},
-    {"name": "Medical Square", "lat": 21.1343, "lon": 79.0850},
-    {"name": "Congress Nagar", "lat": 21.1088, "lon": 79.0542},
-    {"name": "Mankapur Square", "lat": 21.1258, "lon": 79.0992},
-    {"name": "Jaripatka", "lat": 21.1697, "lon": 79.0967},
-    {"name": "Khamla Square", "lat": 21.1047, "lon": 79.0542},
-    {"name": "Lakadganj", "lat": 21.1496, "lon": 79.0783},
-    {"name": "Dhantoli", "lat": 21.1362, "lon": 79.0794},
-    {"name": "Seminary Hills", "lat": 21.1167, "lon": 79.0500},
+    {"name": "Sitabuldi Main Square",  "lat": 21.1497, "lon": 79.0860},
+    {"name": "Dharampeth Church Square","lat": 21.1346, "lon": 79.0669},
+    {"name": "Sadar Bazaar",           "lat": 21.1520, "lon": 79.0877},
+    {"name": "Railway Station",        "lat": 21.1520, "lon": 79.0850},
+    {"name": "Civil Lines",            "lat": 21.1575, "lon": 79.0746},
+    {"name": "Empress Mall",           "lat": 21.1456, "lon": 79.0883},
+    {"name": "Gandhi Sagar Lake",      "lat": 21.1389, "lon": 79.0921},
+    {"name": "Futala Lake",            "lat": 21.1261, "lon": 79.0583},
+    {"name": "Ambazari Lake",          "lat": 21.1124, "lon": 79.0333},
+    {"name": "Kasturchand Park",       "lat": 21.1508, "lon": 79.0904},
+    {"name": "Variety Square",         "lat": 21.1469, "lon": 79.0846},
+    {"name": "Shankar Nagar Square",   "lat": 21.1175, "lon": 79.0745},
+    {"name": "Medical Square",         "lat": 21.1343, "lon": 79.0850},
+    {"name": "Congress Nagar",         "lat": 21.1088, "lon": 79.0542},
+    {"name": "Mankapur Square",        "lat": 21.1258, "lon": 79.0992},
 ]
 
+
+def _telemetry_headers() -> dict:
+    if _API_KEY:
+        return {"X-API-Key": _API_KEY}
+    if _BEARER_TOKEN:
+        return {"Authorization": f"Bearer {_BEARER_TOKEN}"}
+    return {}
+
+
 def create_bins():
-    """Create realistic bins across Nagpur"""
-    print("\n📍 Creating bins...")
-    
-    bin_types = [
-        {"capacity": 100, "type": "residential"},
-        {"capacity": 150, "type": "commercial"},
-        {"capacity": 200, "type": "industrial"},
-        {"capacity": 120, "type": "public"},
-    ]
-    
+    print("\n--- Creating bins ---")
+
+    bin_capacities = [100, 120, 150, 200]
     created = 0
-    for i, location in enumerate(NAGPUR_LOCATIONS[:15], 1):  # Create 15 bins
-        bin_type = random.choice(bin_types)
+
+    for i, location in enumerate(NAGPUR_LOCATIONS, 1):
         fill_level = random.randint(20, 98)
-        
         bin_data = {
             "id": f"bin{i:02d}",
             "location": location["name"],
-            "capacity_liters": bin_type["capacity"],
+            "capacity_liters": random.choice(bin_capacities),
             "fill_level_percent": fill_level,
             "latitude": location["lat"],
-            "longitude": location["lon"]
+            "longitude": location["lon"],
         }
-        
         try:
-            response = requests.post(f"{API_BASE}/bins/", json=bin_data)
-            if response.status_code in [201, 409]:
+            r = requests.post(f"{API_BASE}/bins/", json=bin_data, timeout=5)
+            if r.status_code in (201, 409):
                 created += 1
-                status = "🔵" if fill_level < 70 else "🟡" if fill_level < 90 else "🔴"
-                print(f"  {status} {bin_data['id']}: {location['name']} ({fill_level}%)")
+                tag = "FULL" if fill_level >= 90 else "WARN" if fill_level >= 80 else "OK  "
+                print(f"  [{tag}] {bin_data['id']}: {location['name']} ({fill_level}%)")
             else:
-                print(f"  ❌ Failed to create bin {bin_data['id']}: {response.status_code} - {response.text}")
+                print(f"  [ERR] {bin_data['id']}: {r.status_code} {r.text[:80]}")
         except Exception as e:
-            print(f"  ❌ Error creating {bin_data['id']}: {e}")
-    
-    print(f"✅ Created/Updated {created} bins")
+            print(f"  [ERR] {bin_data['id']}: {e}")
+
+    print(f"  Done — {created} bins created/verified")
     return created
 
+
 def create_crews():
-    """Create waste collection crews"""
-    print("\n👥 Creating crews...")
-    
+    print("\n--- Creating crews ---")
+
     crews = [
         {
             "id": "crew1",
@@ -85,7 +96,7 @@ def create_crews():
             "phone": "+91-9876543210",
             "email": "alpha@nagpurwaste.in",
             "current_latitude": 21.1458,
-            "current_longitude": 79.0882
+            "current_longitude": 79.0882,
         },
         {
             "id": "crew2",
@@ -95,7 +106,7 @@ def create_crews():
             "phone": "+91-9876543211",
             "email": "beta@nagpurwaste.in",
             "current_latitude": 21.1346,
-            "current_longitude": 79.0669
+            "current_longitude": 79.0669,
         },
         {
             "id": "crew3",
@@ -105,249 +116,217 @@ def create_crews():
             "phone": "+91-9876543212",
             "email": "gamma@nagpurwaste.in",
             "current_latitude": 21.1520,
-            "current_longitude": 79.0850
+            "current_longitude": 79.0850,
         },
     ]
-    
+
     created = 0
     for crew in crews:
         try:
-            response = requests.post(f"{API_BASE}/crews/", json=crew)
-            if response.status_code in [201, 409]:
+            r = requests.post(f"{API_BASE}/crews/", json=crew, timeout=5)
+            if r.status_code in (201, 409):
                 created += 1
-                print(f"  👤 {crew['name']} (Leader: {crew['leader']})")
+                print(f"  {crew['name']} (leader: {crew['leader']})")
             else:
-                print(f"  ❌ Failed to create crew {crew['id']}: {response.status_code} - {response.text}")
+                print(f"  [ERR] {crew['id']}: {r.status_code}")
         except Exception as e:
-            print(f"  ❌ Error creating {crew['id']}: {e}")
-    
-    print(f"✅ Created/Updated {created} crews")
+            print(f"  [ERR] {crew['id']}: {e}")
+
+    print(f"  Done — {created} crews created/verified")
     return created
 
-def create_ai_alerts():
-    """Create some AI alerts for demonstration"""
-    print("\n🚨 Creating AI alerts...")
-    
-    alert_types = [
-        {"type": "fire", "desc": "Smoke detected near bin"},
-        {"type": "vandalism", "desc": "Suspicious activity detected"},
-        {"type": "overflow", "desc": "Waste overflow detected"},
-        {"type": "illegal_dumping", "desc": "Unauthorized dumping observed"},
-    ]
-    
-    critical_bins = ["bin01", "bin05", "bin08", "bin12"]
-    
-    created = 0
-    for bin_id in critical_bins:
-        alert = random.choice(alert_types)
-        
-        alert_data = {
-            "bin_id": bin_id,
-            "alert_type": alert["type"],
-            "description": alert["desc"],
-            "timestamp": datetime.utcnow().isoformat()
-        }
-        
-        try:
-            response = requests.post(f"{API_BASE}/ai_alerts/", json=alert_data)
-            if response.status_code == 202:
-                created += 1
-                emoji = "🔥" if alert["type"] == "fire" else "⚠️"
-                print(f"  {emoji} {alert['type']} at {bin_id}")
-        except Exception as e:
-            print(f"  ❌ Error creating alert: {e}")
-    
-    print(f"✅ Created {created} AI alerts")
-    return created
-
-def create_sample_routes():
-    """Create and optimize some sample routes"""
-    print("\n🗺️  Creating sample routes...")
-    
-    route_scenarios = [
-        {
-            "name": "Morning Collection - High Priority",
-            "bins": ["bin01", "bin05", "bin08", "bin12"],
-            "crew": "crew1",
-            "algorithm": "priority"
-        },
-        {
-            "name": "Afternoon Collection - Efficient Route",
-            "bins": ["bin02", "bin06", "bin09", "bin13"],
-            "crew": "crew2",
-            "algorithm": "hybrid"
-        },
-        {
-            "name": "Evening Collection - Optimized",
-            "bins": ["bin03", "bin07", "bin10", "bin14"],
-            "crew": "crew3",
-            "algorithm": "two_opt"
-        },
-    ]
-    
-    created = 0
-    for scenario in route_scenarios:
-        try:
-            response = requests.post(f"{API_BASE}/routes/optimize", json={
-                "bin_ids": scenario["bins"],
-                "crew_id": scenario["crew"],
-                "algorithm": scenario["algorithm"],
-                "save_route": True
-            })
-            
-            if response.status_code == 200:
-                result = response.json()
-                created += 1
-                print(f"  🚛 {scenario['name']}")
-                print(f"     Algorithm: {result['algorithm']}")
-                print(f"     Distance: {result['total_distance_km']} km")
-                print(f"     Time: {result['estimated_time_minutes']:.1f} min")
-                print(f"     Efficiency: {result['efficiency_score']:.3f} bins/km")
-        except Exception as e:
-            print(f"  ❌ Error creating route: {e}")
-    
-    print(f"✅ Created {created} optimized routes")
-    return created
 
 def create_tasks():
-    """Create some tasks for crews"""
-    print("\n📋 Creating tasks...")
-    
+    print("\n--- Creating tasks ---")
+
     tasks = [
         {
             "id": "task001",
-            "title": "Emergency Collection - Fire Alert",
-            "description": "Urgent collection required due to fire alert at Sitabuldi",
+            "title": "Emergency Collection — High Fill",
+            "description": "Urgent collection required at Sitabuldi (fill > 90%)",
             "priority": "high",
             "location": "Sitabuldi Main Square",
             "bin_id": "bin01",
-            "estimated_time_minutes": 30
+            "estimated_time_minutes": 30,
         },
         {
             "id": "task002",
-            "title": "Routine Collection - Commercial Area",
-            "description": "Regular scheduled collection for Sadar Bazaar area",
+            "title": "Routine Collection — Commercial Area",
+            "description": "Scheduled collection for Sadar Bazaar",
             "priority": "medium",
             "location": "Sadar Bazaar",
-            "bin_id": "bin04",
-            "estimated_time_minutes": 45
+            "bin_id": "bin03",
+            "estimated_time_minutes": 45,
         },
         {
             "id": "task003",
-            "title": "Maintenance Check - Sensor Issues",
-            "description": "Check bin sensors at Railway Station",
+            "title": "Maintenance Check — Sensor Issue",
+            "description": "Inspect bin sensors at Railway Station",
             "priority": "low",
             "location": "Railway Station",
-            "bin_id": "bin03",
-            "estimated_time_minutes": 20
+            "bin_id": "bin04",
+            "estimated_time_minutes": 20,
         },
     ]
-    
+
     created = 0
     for task in tasks:
         try:
-            response = requests.post(f"{API_BASE}/tasks/", json=task)
-            if response.status_code in [201, 409]:
+            r = requests.post(f"{API_BASE}/tasks/", json=task, timeout=5)
+            if r.status_code in (201, 409):
                 created += 1
-                priority_emoji = "🔴" if task["priority"] == "high" else "🟡" if task["priority"] == "medium" else "🟢"
-                print(f"  {priority_emoji} {task['title']}")
+                tag = {"high": "HIGH", "medium": "MED ", "low": "LOW "}[task["priority"]]
+                print(f"  [{tag}] {task['title']}")
+            else:
+                print(f"  [ERR] {task['id']}: {r.status_code}")
         except Exception as e:
-            print(f"  ❌ Error creating task: {e}")
-    
-    print(f"✅ Created {created} tasks")
+            print(f"  [ERR] {task['id']}: {e}")
+
+    print(f"  Done — {created} tasks created/verified")
     return created
 
+
+def create_sample_routes():
+    print("\n--- Creating optimized routes ---")
+
+    scenarios = [
+        {
+            "name": "Morning Collection — Priority",
+            "bins": ["bin01", "bin05", "bin08", "bin12"],
+            "crew": "crew1",
+            "algorithm": "priority",
+        },
+        {
+            "name": "Afternoon Collection — Hybrid",
+            "bins": ["bin02", "bin06", "bin09", "bin13"],
+            "crew": "crew2",
+            "algorithm": "hybrid",
+        },
+        {
+            "name": "Evening Collection — Two-opt",
+            "bins": ["bin03", "bin07", "bin10", "bin14"],
+            "crew": "crew3",
+            "algorithm": "two_opt",
+        },
+    ]
+
+    created = 0
+    for s in scenarios:
+        try:
+            r = requests.post(
+                f"{API_BASE}/routes/optimize",
+                json={"bin_ids": s["bins"], "crew_id": s["crew"],
+                      "algorithm": s["algorithm"], "save_route": True},
+                timeout=10,
+            )
+            if r.status_code == 200:
+                result = r.json()
+                created += 1
+                print(
+                    f"  {s['name']}\n"
+                    f"    algorithm={result['algorithm']}  "
+                    f"distance={result['total_distance_km']}km  "
+                    f"time={result['estimated_time_minutes']:.0f}min"
+                )
+            else:
+                print(f"  [ERR] {s['name']}: {r.status_code}")
+        except Exception as e:
+            print(f"  [ERR] {s['name']}: {e}")
+
+    print(f"  Done — {created} routes created")
+    return created
+
+
 def simulate_telemetry():
-    """Send some telemetry data"""
-    print("\n📡 Sending telemetry data...")
-    
-    bins = [f"bin{i:02d}" for i in range(1, 16)]
-    
+    print("\n--- Sending telemetry ---")
+
+    headers = _telemetry_headers()
+    if not headers:
+        print(
+            "  SKIPPED: no auth credentials.\n"
+            "  Set IOT_API_KEY=wsk_live_... in your environment to enable this step."
+        )
+        return 0
+
     sent = 0
-    for bin_id in bins[:10]:  # Send telemetry for first 10 bins
-        telemetry = {
+    for i in range(1, 11):
+        bin_id = f"bin{i:02d}"
+        payload = {
             "bin_id": bin_id,
             "fill_level_percent": random.randint(40, 95),
             "battery_percent": random.randint(60, 100),
             "temperature_c": round(random.uniform(20, 35), 1),
-            "humidity_percent": random.randint(40, 80)
+            "humidity_percent": random.randint(40, 80),
         }
-        
         try:
-            response = requests.post(f"{API_BASE}/telemetry/", json=telemetry)
-            if response.status_code == 202:
+            r = requests.post(f"{API_BASE}/telemetry/", json=payload,
+                              headers=headers, timeout=5)
+            if r.status_code == 202:
                 sent += 1
+            else:
+                print(f"  [ERR] {bin_id}: {r.status_code}")
         except Exception as e:
-            print(f"  ❌ Error sending telemetry: {e}")
-    
-    print(f"✅ Sent telemetry for {sent} bins")
+            print(f"  [ERR] {bin_id}: {e}")
+
+    print(f"  Done — telemetry sent for {sent} bins")
     return sent
 
+
 def show_statistics():
-    """Display current system statistics"""
-    print("\n📊 System Statistics:")
-    
+    print("\n--- System statistics ---")
     try:
-        # Dashboard stats
-        stats = requests.get(f"{API_BASE}/stats/stats").json()
-        print(f"\n  Total Bins: {stats['total_bins']}")
-        print(f"  Bins Online: {stats['bins_online']}")
-        print(f"  Bins Full: {stats['bins_full']}")
-        print(f"  Active Alerts: {stats['active_alerts']}")
-        print(f"  Average Fill Level: {stats['average_fill_level']}%")
-        
-        # Route analytics
-        route_stats = requests.get(f"{API_BASE}/routes/analytics/performance").json()
-        if route_stats['total_routes_completed'] > 0:
-            print(f"\n  Routes Completed: {route_stats['total_routes_completed']}")
-            print(f"  Total Distance: {route_stats['total_distance_km']} km")
-            print(f"  Avg Efficiency: {route_stats['average_efficiency']:.3f} bins/km")
+        # Correct path: /stats/ not /stats/stats
+        stats = requests.get(f"{API_BASE}/stats/", timeout=5).json()
+        print(f"  Total bins:        {stats['total_bins']}")
+        print(f"  Bins online:       {stats['bins_online']}")
+        print(f"  Bins full:         {stats['bins_full']}")
+        print(f"  Bins warning:      {stats['bins_warning']}")
+        print(f"  Avg fill level:    {stats['average_fill_level']}%")
+
+        route_stats = requests.get(
+            f"{API_BASE}/routes/analytics/performance", timeout=5
+        ).json()
+        if route_stats["total_routes_completed"] > 0:
+            print(f"  Routes completed:  {route_stats['total_routes_completed']}")
+            print(f"  Total distance:    {route_stats['total_distance_km']} km")
+            print(f"  Avg efficiency:    {route_stats['average_efficiency']:.3f} bins/km")
     except Exception as e:
-        print(f"  ❌ Error fetching stats: {e}")
+        print(f"  [ERR] {e}")
+
 
 def main():
-    """Main population script"""
-    print("╔════════════════════════════════════════════════════════════╗")
-    print("║   SMART WASTE MANAGEMENT - TEST DATA POPULATION           ║")
-    print("╚════════════════════════════════════════════════════════════╝")
-    
-    # Check if server is running
+    print("=" * 62)
+    print("  SMART WASTE MANAGEMENT — TEST DATA POPULATION")
+    print("=" * 62)
+
     try:
-        response = requests.get(f"{API_BASE}/health")
-        if response.status_code != 200:
-            print("\n❌ Backend server is not responding!")
+        r = requests.get(f"{API_BASE}/health", timeout=5)
+        if r.status_code != 200:
+            print("\nERROR: Backend server is not responding.")
             return
-    except Exception as e:
-        print(f"\n❌ Cannot connect to backend server at {API_BASE}")
-        print("   Make sure the server is running: uvicorn main:app --reload")
+    except Exception:
+        print(f"\nERROR: Cannot connect to {API_BASE}")
+        print("Make sure the server is running: uvicorn main:app --reload")
         return
-    
-    print("\n✅ Backend server is online!")
-    print("\nPopulating database with test data...\n")
-    
-    # Create all test data
-    bins = create_bins()
-    crews = create_crews()
-    alerts = create_ai_alerts()
-    tasks = create_tasks()
-    routes = create_sample_routes()
-    telemetry = simulate_telemetry()
-    
-    # Show summary
-    print("\n" + "="*60)
-    print("📈 POPULATION COMPLETE")
-    print("="*60)
-    
+
+    print("\nBackend server is online. Populating database...\n")
+
+    create_bins()
+    create_crews()
+    create_tasks()
+    create_sample_routes()
+    simulate_telemetry()
     show_statistics()
-    
-    print("\n" + "="*60)
-    print("\n🎉 Your Smart Waste Management system is ready for demo!")
-    print("\n📝 Next steps:")
-    print("   1. Open http://localhost:8000/docs for API documentation")
-    print("   2. Test route optimization with: python test_routes.py")
-    print("   3. Start IoT simulation: python simulate_iot.py")
-    print("   4. Start AI alerts simulation: python simulate_ai_alerts.py")
-    print("\n✨ Happy testing!\n")
+
+    print("\n" + "=" * 62)
+    print("  DONE")
+    print("=" * 62)
+    print("\nNext steps:")
+    print("  1. Browse API docs:       http://localhost:8000/docs")
+    print("  2. Test route optimizer:  python test_routes.py")
+    print("  3. Start IoT simulation:  python simulate_iot.py --fast")
+    print()
+
 
 if __name__ == "__main__":
     main()

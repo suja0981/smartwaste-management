@@ -1,6 +1,7 @@
 // Centralized API client for all backend communication
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+const TOKEN_KEY = 'swm_token'
 
 // Error class for API errors
 export class ApiError extends Error {
@@ -17,7 +18,7 @@ export class ApiError extends Error {
 // Get auth token from localStorage
 function getAuthToken(): string | null {
   if (typeof window === 'undefined') return null
-  return localStorage.getItem('authToken')
+  return localStorage.getItem(TOKEN_KEY)
 }
 
 // Generic fetch wrapper with error handling
@@ -118,7 +119,7 @@ export async function getCurrentUser(): Promise<AuthUser> {
 }
 
 export async function logout(): Promise<void> {
-  localStorage.removeItem('authToken')
+  localStorage.removeItem(TOKEN_KEY)
 }
 
 // ============================================

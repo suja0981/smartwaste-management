@@ -6,13 +6,15 @@ Added Firebase service account path + IoT API key prefix.
 from pydantic_settings import BaseSettings
 from typing import List, Optional
 from functools import lru_cache
-import os
 
 
 class Settings(BaseSettings):
     # ── Core API ──────────────────────────────────────────────────────────────
     api_title: str = "Smart Waste Management API"
-    api_description: str = "AI-Powered CCTV Monitoring, IoT Sensors, Route Optimization & ML Predictions"
+    api_description: str = (
+        "IoT Sensor Integration, Real-time WebSocket Feed, "
+        "Route Optimization & ML Fill Predictions"
+    )
     api_version: str = "3.0.0"
     api_host: str = "0.0.0.0"
     api_port: int = 8000
@@ -22,12 +24,12 @@ class Settings(BaseSettings):
     # ── Security ──────────────────────────────────────────────────────────────
     secret_key: str = "your-super-secret-key-change-this-in-production"
     algorithm: str = "HS256"
-    access_token_expire_minutes: int = 30    
+    access_token_expire_minutes: int = 30
     refresh_token_expire_days: int = 7
+
     # ── Database ──────────────────────────────────────────────────────────────
     # SQLite (default): "sqlite:///./smart_waste.db"
     # PostgreSQL: "postgresql://user:password@localhost:5432/smart_waste"
-    # PostgreSQL (psycopg): "postgresql+psycopg://user:password@localhost:5432/smart_waste"
     database_url: str = "sqlite:///./smart_waste.db"
 
     # ── CORS ──────────────────────────────────────────────────────────────────

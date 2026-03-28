@@ -2,11 +2,14 @@
 
 import { DashboardLayout } from "@/components/dashboard-layout"
 import { InteractiveMap } from "@/components/interactive-map"
+import { ProtectedRoute } from "@/components/protected-route"
 
 export default function MapPage() {
   return (
-    <DashboardLayout>
-      <InteractiveMap />
-    </DashboardLayout>
+    <ProtectedRoute>
+      <DashboardLayout>
+        <InteractiveMap />
+      </DashboardLayout>
+    </ProtectedRoute>
   )
 }
