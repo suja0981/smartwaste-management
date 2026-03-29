@@ -1,15 +1,14 @@
-//Analytics/reports page. Renders AnalyticsReports.
-
+// app/reports/page.tsx
 import { DashboardLayout } from "@/components/dashboard-layout"
 import { AnalyticsReports } from "@/components/analytics-reports"
-import { ProtectedRoute } from "@/components/protected-route"
+import { AdminOnlyRoute } from "@/components/protected-route"
 
 export default function ReportsPage() {
   return (
-    <ProtectedRoute>
+    <AdminOnlyRoute>
       <DashboardLayout>
         <AnalyticsReports />
       </DashboardLayout>
-    </ProtectedRoute>
+    </AdminOnlyRoute>
   )
 }

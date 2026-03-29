@@ -1,13 +1,16 @@
 """
-Seed demo users into the database.
+seed_users.py — Seed demo users into the database.
 
 FIX: Old demo password "password123" fails the PasswordPolicy that's now
      enforced at signup (requires a special character).
      Demo passwords updated to "Admin@1234" and "User@1234".
+
+Run once before starting the server:
+  python seed_users.py
 """
 
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlalchemy.orm import Session
 from database import SessionLocal, UserDB, engine, Base
 from passlib.context import CryptContext
@@ -21,17 +24,16 @@ def get_password_hash(password: str) -> str:
 
 def seed_users():
     Base.metadata.create_all(bind=engine)
-    db = SessionLocal()
+    db: Session = SessionLocal()
 
     try:
-        admin_email = "admin@example.com"
-        user_email = "user@example.com"
-        admin_password = "Admin@1234"
-        user_password = "User@1234"
+        now = datetime.now(timezone.utc)
 
+        admin_email = "admin@example.com"
+        admin_password = "Admin@1234"
         admin = db.query(UserDB).filter(UserDB.email == admin_email).first()
         if admin:
-            print("✓ Admin user already exists")
+            print("  admin user already exists")
         else:
             db.add(UserDB(
                 email=admin_email,
@@ -39,14 +41,16 @@ def seed_users():
                 hashed_password=get_password_hash(admin_password),
                 role="admin",
                 is_active=True,
-                created_at=datetime.utcnow(),
+                created_at=now,
                 auth_provider="local",
             ))
-            print(f"✓ Created admin: {admin_email} / {admin_password}")
+            print(f"  created admin: {admin_email} / {admin_password}")
 
+        user_email = "user@example.com"
+        user_password = "User@1234"
         user = db.query(UserDB).filter(UserDB.email == user_email).first()
         if user:
-            print("✓ Regular user already exists")
+            print("  regular user already exists")
         else:
             db.add(UserDB(
                 email=user_email,
@@ -54,21 +58,21 @@ def seed_users():
                 hashed_password=get_password_hash(user_password),
                 role="user",
                 is_active=True,
-                created_at=datetime.utcnow(),
+                created_at=now,
                 auth_provider="local",
             ))
-            print(f"✓ Created user:  {user_email} / {user_password}")
+            print(f"  created user:  {user_email} / {user_password}")
 
         db.commit()
-        print("\n✅ Database seeded successfully!")
-        print("\n" + "─" * 50)
-        print("ADMIN:  admin@example.com  /  Admin@1234  (full access)")
-        print("USER:   user@example.com   /  User@1234   (read-only)")
-        print("─" * 50)
+        print("\nDatabase seeded successfully.")
+        print("-" * 50)
+        print(f"ADMIN:  {admin_email}  /  {admin_password}  (full access)")
+        print(f"USER:   {user_email}   /  {user_password}   (read-only)")
+        print("-" * 50)
 
     except Exception as e:
         db.rollback()
-        print(f"✗ Error seeding database: {e}")
+        print(f"Error seeding database: {e}")
         sys.exit(1)
     finally:
         db.close()

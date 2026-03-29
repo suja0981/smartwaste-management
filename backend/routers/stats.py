@@ -3,15 +3,18 @@ routers/stats.py
 
 FIX: Removed all AIAlertDB references (model was never defined in database.py,
      causing NameError on every request to /stats/).
+FIX: datetime.utcnow() replaced with datetime.now(timezone.utc).
+FIX: Removed unused require_admin import (no endpoint here requires admin).
 ADDED: /zones endpoint for Phase 6 multi-zone support.
 """
+
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 
 from database import get_db, BinDB, TaskDB, CrewDB, TelemetryDB
-from auth_utils import require_admin
 
 router = APIRouter()
 
@@ -28,12 +31,10 @@ def get_dashboard_stats(db: Session = Depends(get_db)):
     bins_warning = db.query(BinDB).filter(BinDB.status == "warning").count()
     avg_fill = db.query(func.avg(BinDB.fill_level_percent)).scalar()
 
-    # Task stats
     total_tasks = db.query(TaskDB).count()
     pending_tasks = db.query(TaskDB).filter(TaskDB.status == "pending").count()
     in_progress_tasks = db.query(TaskDB).filter(TaskDB.status == "in-progress").count()
 
-    # Crew stats
     available_crews = db.query(CrewDB).filter(CrewDB.status == "available").count()
     active_crews = db.query(CrewDB).filter(CrewDB.status == "active").count()
 
@@ -108,7 +109,6 @@ def get_zone_stats(db: Session = Depends(get_db)):
         entry["_fills"].append(b.fill_level_percent)
         entry[b.status] = entry.get(b.status, 0) + 1
 
-    # Clean up internal list and add avg
     result = {}
     for zone, data in by_zone.items():
         fills = data.pop("_fills")
@@ -121,11 +121,11 @@ def get_zone_stats(db: Session = Depends(get_db)):
 @router.get("/telemetry/recent")
 def get_recent_telemetry_stats(db: Session = Depends(get_db)):
     """
-    Count telemetry readings in last 24h for monitoring data flow.
+    Count telemetry readings in the last 24 hours.
+    Useful for monitoring data flow from IoT devices.
     GET /stats/telemetry/recent
     """
-    from datetime import datetime, timedelta
-    cutoff = datetime.utcnow() - timedelta(hours=24)
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
     count = db.query(TelemetryDB).filter(TelemetryDB.timestamp >= cutoff).count()
     bins_reporting = (
         db.query(TelemetryDB.bin_id)

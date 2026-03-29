@@ -1,7 +1,7 @@
 """
-api_key_service.py
+api_key_services.py
 
-Lightweight API key auth for IoT devices and CCTV systems.
+Lightweight API key auth for IoT devices.
 
 Why not Firebase for devices?
   Firebase auth requires a network round-trip to Google's servers and a
@@ -17,7 +17,7 @@ Security design:
 
 import hashlib
 import secrets
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 from sqlalchemy.orm import Session
@@ -26,6 +26,10 @@ from database import APIKeyDB
 from config import get_settings
 
 settings = get_settings()
+
+
+def _now() -> datetime:
+    return datetime.now(timezone.utc)
 
 
 def _hash_key(plain_key: str) -> str:
@@ -44,7 +48,6 @@ def generate_api_key(label: str, db: Session) -> dict:
             "label": "Bin Sensor - Site A"
         }
     """
-    # 32 random bytes → 43-char URL-safe base64 string
     raw = secrets.token_urlsafe(32)
     plain_key = f"{settings.api_key_prefix}{raw}"
 
@@ -52,7 +55,7 @@ def generate_api_key(label: str, db: Session) -> dict:
         key_hash=_hash_key(plain_key),
         label=label,
         is_active=True,
-        created_at=datetime.utcnow(),
+        created_at=_now(),
     )
     db.add(record)
     db.commit()
@@ -71,7 +74,7 @@ def verify_api_key(plain_key: str, db: Session) -> Optional[APIKeyDB]:
     Verify an API key from the X-API-Key header.
 
     Returns the APIKeyDB record if valid and active, else None.
-    Also updates last_used_at.
+    Updates last_used_at on every successful verification.
     """
     if not plain_key or not plain_key.startswith(settings.api_key_prefix):
         return None
@@ -79,11 +82,11 @@ def verify_api_key(plain_key: str, db: Session) -> Optional[APIKeyDB]:
     key_hash = _hash_key(plain_key)
     record = db.query(APIKeyDB).filter(
         APIKeyDB.key_hash == key_hash,
-        APIKeyDB.is_active == True,         # noqa: E712
+        APIKeyDB.is_active == True,  # noqa: E712
     ).first()
 
     if record:
-        record.last_used_at = datetime.utcnow()
+        record.last_used_at = _now()
         db.commit()
 
     return record

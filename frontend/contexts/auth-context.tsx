@@ -3,13 +3,21 @@
 /**
  * contexts/auth-context.tsx
  *
- * Fixes from original:
- *  1. refreshAccessToken() was defined but never called.
- *     Now called automatically when any fetch returns 401.
- *     Exported as part of context so components can also trigger it.
- *  2. api-client.ts logout() only cleared localStorage — did not call backend.
- *     Logout now calls POST /auth/logout to revoke the JWT server-side.
- *  3. Minor: `exchangeFirebaseToken` dep array was unstable across renders.
+ * Works with the updated lib/firebase.ts which uses lazy initialization
+ * to avoid server-side crashes (firebase/auth is browser-only).
+ *
+ * Key changes from previous version:
+ *  - No longer imports `auth` directly from firebase.ts (that was the
+ *    exported module-level getAuth() call that crashed SSR).
+ *  - onAuthStateChanged is now imported from firebase.ts as a plain
+ *    function wrapper that uses require() internally, keeping it out of
+ *    the server's static import graph.
+ *  - hasBackendSession ref prevents Firebase from silently re-logging
+ *    the user in on every page load when a local session already exists.
+ *  - 3-second safety timeout prevents the UI from being blocked forever
+ *    if Firebase is misconfigured or slow to respond.
+ *  - clearSession() is called synchronously at the top of logout() so
+ *    the UI updates immediately — before any async calls complete.
  */
 
 import React, {
@@ -18,10 +26,10 @@ import React, {
   useEffect,
   useState,
   useCallback,
+  useRef,
   ReactNode,
 } from "react"
 import {
-  auth,
   signInWithGoogle,
   signInWithEmail,
   registerWithEmail,
@@ -50,7 +58,6 @@ interface AuthContextType {
   registerWithEmailPassword: (email: string, password: string, fullName: string) => Promise<void>
   loginLocal: (email: string, password: string) => Promise<void>
   logout: () => Promise<void>
-  /** Manually trigger a token refresh — also called internally on 401 */
   refreshAccessToken: () => Promise<boolean>
 }
 
@@ -61,12 +68,18 @@ const TOKEN_KEY = "swm_token"
 const REFRESH_TOKEN_KEY = "swm_refresh_token"
 const USER_KEY = "swm_user"
 
+const FIREBASE_TIMEOUT_MS = 3000
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<BackendUser | null>(null)
   const [token, setToken] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(true)
 
-  // ── Session persistence ──────────────────────────────────────────────────
+  // Tracks whether a valid backend session is already in localStorage.
+  // Prevents Firebase from silently re-establishing a session on every page load.
+  const hasBackendSession = useRef(false)
+
+  // ── Session helpers ──────────────────────────────────────────────────────
 
   const persistSession = useCallback(
     (jwt: string, backendUser: BackendUser, refreshToken?: string) => {
@@ -75,6 +88,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       localStorage.setItem(USER_KEY, JSON.stringify(backendUser))
       setToken(jwt)
       setUser(backendUser)
+      hasBackendSession.current = true
     },
     []
   )
@@ -85,10 +99,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     localStorage.removeItem(USER_KEY)
     setToken(null)
     setUser(null)
+    hasBackendSession.current = false
   }, [])
 
   // ── Token refresh ────────────────────────────────────────────────────────
-  // FIX: this was defined but never called. Now called on 401 via fetchWithAuth.
 
   const refreshAccessToken = useCallback(async (): Promise<boolean> => {
     const refreshToken = localStorage.getItem(REFRESH_TOKEN_KEY)
@@ -111,7 +125,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, [persistSession, clearSession])
 
-  // ── Firebase exchange ────────────────────────────────────────────────────
+  // ── Firebase token → backend session exchange ────────────────────────────
 
   const exchangeFirebaseToken = useCallback(
     async (firebaseUser: FirebaseUser): Promise<void> => {
@@ -134,36 +148,52 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // ── Firebase auth state listener ─────────────────────────────────────────
 
   useEffect(() => {
-    // Restore from localStorage instantly (no flicker)
+    // Restore backend session from localStorage immediately (no loading flicker)
     const savedToken = localStorage.getItem(TOKEN_KEY)
     const savedUser = localStorage.getItem(USER_KEY)
     if (savedToken && savedUser) {
       try {
         setToken(savedToken)
         setUser(JSON.parse(savedUser))
+        hasBackendSession.current = true
       } catch {
         clearSession()
       }
     }
 
-    const unsubscribe = onAuthStateChanged(auth, async (fbUser: FirebaseUser | null) => {
+    // Safety valve: if Firebase doesn't respond within 3 seconds, unblock UI
+    const loadingTimeout = setTimeout(() => setIsLoading(false), FIREBASE_TIMEOUT_MS)
+
+    // onAuthStateChanged from firebase.ts uses require() internally so it
+    // never runs during SSR — safe to call here inside useEffect (browser only)
+    const unsubscribe = onAuthStateChanged(async (fbUser: FirebaseUser | null) => {
+      clearTimeout(loadingTimeout)
+
       if (fbUser) {
-        try {
-          await exchangeFirebaseToken(fbUser)
-        } catch {
-          // If exchange fails, keep existing local token
+        // Only exchange if there is no existing backend session.
+        // Without this check, Firebase re-logs the user in on EVERY page load.
+        if (!hasBackendSession.current) {
+          try {
+            await exchangeFirebaseToken(fbUser)
+          } catch {
+            // Exchange failed — don't force a session; let the user log in manually
+          }
         }
       } else {
-        const hasLocalToken = localStorage.getItem(TOKEN_KEY)
-        if (!hasLocalToken) clearSession()
+        // Firebase says signed out — clear everything
+        clearSession()
       }
+
       setIsLoading(false)
     })
 
-    return unsubscribe
+    return () => {
+      clearTimeout(loadingTimeout)
+      unsubscribe()
+    }
   }, [exchangeFirebaseToken, clearSession])
 
-  // ── Actions ───────────────────────────────────────────────────────────────
+  // ── Public auth actions ───────────────────────────────────────────────────
 
   const loginWithGoogle = useCallback(async () => {
     const result = await signInWithGoogle()
@@ -215,9 +245,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   )
 
   const logout = useCallback(async () => {
-    // FIX: original api-client logout() only cleared localStorage.
-    // Now we call the backend so the JWT is server-side revoked.
+    // Clear local state synchronously first — UI responds immediately on click
     const currentToken = localStorage.getItem(TOKEN_KEY)
+    clearSession()
+
+    // Revoke backend JWT server-side (fire-and-forget)
     if (currentToken) {
       fetch(`${API_BASE}/auth/logout`, {
         method: "POST",
@@ -227,8 +259,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         },
       }).catch(() => {})
     }
+
+    // Sign Firebase out so onAuthStateChanged fires with null,
+    // preventing it from re-establishing the session on the next render
     await firebaseSignOut().catch(() => {})
-    clearSession()
   }, [clearSession])
 
   return (

@@ -4,22 +4,15 @@ routers/reports.py  —  Phase 5: Reports export.
 Endpoints:
   GET /reports/export?format=pdf   →  download PDF report
   GET /reports/export?format=xlsx  →  download Excel workbook
-  GET /reports/summary             →  JSON summary (for custom rendering)
+  GET /reports/summary             →  JSON summary (no admin required)
 
-Install dependencies (already in updated requirements.txt):
+Dependencies:
   pip install reportlab openpyxl
-
-The reports include:
-  - Executive summary (KPIs)
-  - Bin status table with fill levels
-  - Route history (collections completed)
-  - Task completion stats
-  - Zone breakdown (if zones configured)
 """
 
 import io
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -34,11 +27,14 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+def _now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
 # ─── Data gathering ───────────────────────────────────────────────────────────
 
 def _gather_report_data(db: Session, days: int = 30) -> dict:
-    """Collect all data needed for the report."""
-    since = datetime.utcnow() - timedelta(days=days)
+    since = _now() - timedelta(days=days)
 
     bins = db.query(BinDB).order_by(BinDB.zone_id, BinDB.location).all()
     tasks = db.query(TaskDB).filter(TaskDB.created_at >= since).all()
@@ -48,7 +44,7 @@ def _gather_report_data(db: Session, days: int = 30) -> dict:
     avg_fill = db.query(func.avg(BinDB.fill_level_percent)).scalar() or 0
 
     return {
-        "generated_at": datetime.utcnow(),
+        "generated_at": _now(),
         "period_days": days,
         "bins": bins,
         "tasks": tasks,
@@ -71,7 +67,6 @@ def _gather_report_data(db: Session, days: int = 30) -> dict:
 # ─── PDF generation ───────────────────────────────────────────────────────────
 
 def _generate_pdf(data: dict) -> bytes:
-    """Generate a PDF report using reportlab."""
     try:
         from reportlab.lib import colors
         from reportlab.lib.pagesizes import A4
@@ -103,19 +98,17 @@ def _generate_pdf(data: dict) -> bytes:
 
     story = []
 
-    # ── Header ──
     story.append(Paragraph("Smart Waste Management Report", title_style))
     story.append(Paragraph(f"Generated: {gen}  |  Period: last {period} days", normal))
     story.append(HRFlowable(width="100%", spaceAfter=12))
 
-    # ── KPI summary ──
     story.append(Paragraph("Executive Summary", h2_style))
     kpi_data = [
         ["Metric", "Value"],
         ["Total Bins", str(kpis["total_bins"])],
         ["Average Fill Level", f"{kpis['avg_fill_level']}%"],
         ["Bins Currently Full", str(kpis["bins_full"])],
-        ["Bins Warning (≥80%)", str(kpis["bins_warning"])],
+        ["Bins Warning (>=80%)", str(kpis["bins_warning"])],
         ["Bins Offline", str(kpis["bins_offline"])],
         ["Routes Completed", str(kpis["routes_completed"])],
         ["Total Distance Driven", f"{kpis['total_distance_km']} km"],
@@ -134,13 +127,12 @@ def _generate_pdf(data: dict) -> bytes:
     story.append(t)
     story.append(Spacer(1, 16))
 
-    # ── Bin status table ──
     story.append(Paragraph("Bin Status", h2_style))
     bin_rows = [["Bin ID", "Location", "Fill %", "Status", "Zone"]]
     for b in data["bins"]:
         bin_rows.append([
             b.id,
-            b.location[:35] + "…" if len(b.location) > 35 else b.location,
+            b.location[:35] + "..." if len(b.location) > 35 else b.location,
             f"{b.fill_level_percent}%",
             b.status.upper(),
             b.zone_id or "—",
@@ -158,11 +150,10 @@ def _generate_pdf(data: dict) -> bytes:
     story.append(bt)
     story.append(Spacer(1, 16))
 
-    # ── Route history ──
     if data["routes"]:
         story.append(Paragraph(f"Collection Routes (last {period} days)", h2_style))
         route_rows = [["Route ID", "Crew", "Bins", "Distance km", "Time min", "Date"]]
-        for r in data["routes"][:30]:  # cap at 30 rows
+        for r in data["routes"][:30]:
             route_rows.append([
                 str(r.route_id)[:12],
                 str(r.crew_id)[:12],
@@ -189,7 +180,6 @@ def _generate_pdf(data: dict) -> bytes:
 # ─── Excel generation ─────────────────────────────────────────────────────────
 
 def _generate_xlsx(data: dict) -> bytes:
-    """Generate an Excel workbook using openpyxl."""
     try:
         import openpyxl
         from openpyxl.styles import Font, PatternFill, Alignment
@@ -202,7 +192,6 @@ def _generate_xlsx(data: dict) -> bytes:
 
     wb = openpyxl.Workbook()
 
-    # ── Header fill helper ──
     def _header(ws, row, cols):
         fill = PatternFill("solid", fgColor="1a73e8")
         font = Font(bold=True, color="FFFFFF")
@@ -217,7 +206,6 @@ def _generate_xlsx(data: dict) -> bytes:
             max_len = max((len(str(c.value)) for c in col if c.value), default=10)
             ws.column_dimensions[get_column_letter(col[0].column)].width = min(max_len + 4, 40)
 
-    # ── Sheet 1: Summary ──
     ws1 = wb.active
     ws1.title = "Summary"
     ws1["A1"] = "Smart Waste Management Report"
@@ -243,9 +231,8 @@ def _generate_xlsx(data: dict) -> bytes:
         ws1.cell(i, 2, v)
     _auto_width(ws1)
 
-    # ── Sheet 2: Bins ──
     ws2 = wb.create_sheet("Bins")
-    _header(ws2, 1, ["Bin ID", "Location", "Fill %", "Status", "Battery %", "Temp °C", "Zone", "Last Telemetry"])
+    _header(ws2, 1, ["Bin ID", "Location", "Fill %", "Status", "Battery %", "Temp C", "Zone", "Last Telemetry"])
     for i, b in enumerate(data["bins"], 2):
         ws2.cell(i, 1, b.id)
         ws2.cell(i, 2, b.location)
@@ -257,7 +244,6 @@ def _generate_xlsx(data: dict) -> bytes:
         ws2.cell(i, 8, b.last_telemetry.strftime("%Y-%m-%d %H:%M") if b.last_telemetry else "")
     _auto_width(ws2)
 
-    # ── Sheet 3: Route History ──
     ws3 = wb.create_sheet("Route History")
     _header(ws3, 1, ["Route ID", "Crew ID", "Bins Collected", "Distance km", "Time min", "Efficiency", "Date"])
     for i, r in enumerate(data["routes"], 2):
@@ -270,7 +256,6 @@ def _generate_xlsx(data: dict) -> bytes:
         ws3.cell(i, 7, r.completion_date.strftime("%Y-%m-%d") if r.completion_date else "")
     _auto_width(ws3)
 
-    # ── Sheet 4: Tasks ──
     ws4 = wb.create_sheet("Tasks")
     _header(ws4, 1, ["Task ID", "Title", "Priority", "Status", "Location", "Crew", "Created", "Completed"])
     for i, t in enumerate(data["tasks"], 2):
@@ -299,12 +284,10 @@ def export_report(
     _admin=Depends(require_admin),
 ):
     """
-    Export a management report.
+    Export a management report. Admin only.
 
     GET /reports/export?format=pdf&days=30
     GET /reports/export?format=xlsx&days=7
-
-    Admin only.
     """
     data = _gather_report_data(db, days=days)
     ts = data["generated_at"].strftime("%Y%m%d_%H%M")
