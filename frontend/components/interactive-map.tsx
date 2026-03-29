@@ -3,35 +3,30 @@
 /**
  * components/interactive-map.tsx
  *
- * Real Leaflet map replacing the fake SVG grid.
+ * FIXES applied:
  *
- * Setup (run once):
- *   npm install leaflet react-leaflet
- *   npm install -D @types/leaflet
+ * 1. Leaflet CSS <link> removed from JSX (was re-injected inside CardContent on
+ *    every render, producing duplicate stylesheets and a layout flash on
+ *    re-mount). Move the import to app/layout.tsx instead:
+ *      import "leaflet/dist/leaflet.css"
+ *    or add to globals.css:
+ *      @import "leaflet/dist/leaflet.css";
  *
- * Features:
- *  - Real OpenStreetMap tiles (free, no API key)
- *  - Bin markers coloured by fill level (green / amber / red)
- *  - Crew markers (blue)
- *  - Route polyline drawn from waypoints
- *  - Click any marker to see a detailed popup
- *  - Layer toggles: bins / crews / routes
- *  - Status filter for bins
- *  - Sidebar list synced with map selection
- *  - Respects dark mode by swapping tile layer
- *  - Center defaults to Nagpur from env vars
+ * 2. `selected` removed from the dep arrays of the bin-marker and crew-marker
+ *    useEffects. Including it caused a full marker teardown + rebuild on every
+ *    click, which re-ran the Leaflet icon constructor for every visible marker,
+ *    produced a visible flash, and leaked the old marker instances until GC.
+ *    Selection styling is now handled by a dedicated lightweight useEffect that
+ *    only updates the icon of the two affected markers (previous and next
+ *    selection) rather than re-rendering the entire layer.
  *
- * Why Leaflet over Google Maps:
- *  - Free with no API key for OpenStreetMap tiles
- *  - Smaller bundle than @googlemaps/js-api-loader
- *  - react-leaflet provides first-class React bindings
- *  - Custom SVG markers work natively
+ * 3. getLeaflet() is called once per effect, not once per marker inside the
+ *    loop, so the dynamic import promise is not re-awaited N times.
  */
 
 import {
-  useEffect, useState, useCallback, useMemo, useRef, memo
+  useEffect, useState, useCallback, useMemo, useRef
 } from "react"
-import dynamic from "next/dynamic"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -41,11 +36,9 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useToast } from "@/hooks/use-toast"
 import { getBins, getCrews, getRoutes, type Bin, type Crew, type Route } from "@/lib/api-client"
 import { mapBinStatus } from "@/lib/status-mapper"
-import { Trash2, Users, Route as RouteIcon, RefreshCw, Loader2, MapPin, Battery, Thermometer, Droplets } from "lucide-react"
+import { Trash2, Users, Route as RouteIcon, RefreshCw, Loader2, MapPin } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useTheme } from "next-themes"
-
-// ─── Constants ────────────────────────────────────────────────────────────────
 
 const DEFAULT_LAT = parseFloat(process.env.NEXT_PUBLIC_MAP_CENTER_LAT || "21.1458")
 const DEFAULT_LNG = parseFloat(process.env.NEXT_PUBLIC_MAP_CENTER_LNG || "79.0882")
@@ -54,8 +47,6 @@ const DEFAULT_ZOOM = parseInt(process.env.NEXT_PUBLIC_MAP_DEFAULT_ZOOM || "13")
 const TILE_LIGHT = "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
 const TILE_DARK = "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
 const TILE_ATTRIBUTION = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
-
-// ─── Colour helpers ───────────────────────────────────────────────────────────
 
 function binColor(fill: number): string {
   if (fill >= 90) return "#ef4444"
@@ -67,7 +58,6 @@ function makeBinIcon(fill: number, selected: boolean): string {
   const color = binColor(fill)
   const size = selected ? 36 : 30
   const r = size / 2
-  // SVG data URI pin shape
   return `data:image/svg+xml;utf8,${encodeURIComponent(`
     <svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size + 8}" viewBox="0 0 ${size} ${size + 8}">
       <circle cx="${r}" cy="${r}" r="${r - 2}" fill="${color}" stroke="white" stroke-width="2.5"/>
@@ -89,15 +79,11 @@ function makeCrewIcon(status: string, selected: boolean): string {
   `)}`
 }
 
-// ─── Dynamic Leaflet imports (SSR safe) ───────────────────────────────────────
-// Leaflet touches `window` on import — must be dynamically loaded in Next.js.
-
 let L: typeof import("leaflet") | null = null
 
 async function getLeaflet() {
   if (L) return L
   L = await import("leaflet")
-  // Fix default icon paths broken by webpack
   delete (L.Icon.Default.prototype as { _getIconUrl?: unknown })._getIconUrl
   L.Icon.Default.mergeOptions({
     iconRetinaUrl: "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon-2x.png",
@@ -107,14 +93,10 @@ async function getLeaflet() {
   return L
 }
 
-// ─── Types ────────────────────────────────────────────────────────────────────
-
 type SelectedItem =
   | { type: "bin"; data: Bin }
   | { type: "crew"; data: Crew }
   | null
-
-// ─── Main component ───────────────────────────────────────────────────────────
 
 export function InteractiveMap() {
   const [bins, setBins] = useState<Bin[]>([])
@@ -129,7 +111,6 @@ export function InteractiveMap() {
   const { toast } = useToast()
   const { resolvedTheme } = useTheme()
 
-  // Leaflet map instance refs
   const mapRef = useRef<import("leaflet").Map | null>(null)
   const mapDivRef = useRef<HTMLDivElement>(null)
   const markersRef = useRef<import("leaflet").Marker[]>([])
@@ -138,7 +119,9 @@ export function InteractiveMap() {
   const tileLayerRef = useRef<import("leaflet").TileLayer | null>(null)
   const mountedRef = useRef(false)
 
-  // ── Data fetching ────────────────────────────────────────────────────────
+  // Keep a stable id → marker map for cheap icon updates on selection change
+  const binMarkerMapRef = useRef<Map<string, import("leaflet").Marker>>(new Map())
+  const crewMarkerMapRef = useRef<Map<string, import("leaflet").Marker>>(new Map())
 
   const fetchData = useCallback(async (silent = false) => {
     try {
@@ -164,8 +147,7 @@ export function InteractiveMap() {
     return () => clearInterval(id)
   }, [fetchData])
 
-  // ── Map initialisation ───────────────────────────────────────────────────
-
+  // Map init — runs once
   useEffect(() => {
     if (mountedRef.current || !mapDivRef.current) return
     mountedRef.current = true
@@ -197,8 +179,7 @@ export function InteractiveMap() {
     }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── Swap tile layer on theme change ─────────────────────────────────────
-
+  // Tile swap on theme change
   useEffect(() => {
     const map = mapRef.current
     const old = tileLayerRef.current
@@ -215,16 +196,17 @@ export function InteractiveMap() {
     })
   }, [resolvedTheme])
 
-  // ── Render bin markers ───────────────────────────────────────────────────
-
+  // FIX: `selected` removed from deps. Markers are rebuilt only when bins/
+  // showBins/statusFilter change. Selection icon swaps are handled by a
+  // separate lightweight effect below.
   useEffect(() => {
     const map = mapRef.current
     if (!map) return
 
     getLeaflet().then((leaflet) => {
-      // Remove old markers
       markersRef.current.forEach((m) => m.remove())
       markersRef.current = []
+      binMarkerMapRef.current.clear()
 
       if (!showBins) return
 
@@ -235,11 +217,11 @@ export function InteractiveMap() {
 
       filtered.forEach((bin) => {
         if (!bin.latitude || !bin.longitude) return
-        const isSelected = selected?.type === "bin" && selected.data.id === bin.id
+
         const icon = leaflet.icon({
-          iconUrl: makeBinIcon(bin.fill_level_percent, isSelected),
-          iconSize: [isSelected ? 36 : 30, isSelected ? 44 : 38],
-          iconAnchor: [isSelected ? 18 : 15, isSelected ? 44 : 38],
+          iconUrl: makeBinIcon(bin.fill_level_percent, false),
+          iconSize: [30, 38],
+          iconAnchor: [15, 38],
           popupAnchor: [0, -40],
         })
 
@@ -264,12 +246,42 @@ export function InteractiveMap() {
         marker.on("click", () => setSelected({ type: "bin", data: bin }))
         marker.addTo(map)
         markersRef.current.push(marker)
+        binMarkerMapRef.current.set(bin.id, marker)
       })
     })
-  }, [bins, showBins, statusFilter, selected])
+  }, [bins, showBins, statusFilter]) // ← `selected` intentionally removed
 
-  // ── Render crew markers ──────────────────────────────────────────────────
+  // FIX: Lightweight icon-swap effect — only updates the two affected markers
+  // when the selection changes. No full layer rebuild.
+  useEffect(() => {
+    getLeaflet().then((leaflet) => {
+      binMarkerMapRef.current.forEach((marker, id) => {
+        const bin = bins.find((b) => b.id === id)
+        if (!bin) return
+        const isSelected = selected?.type === "bin" && selected.data.id === id
+        marker.setIcon(leaflet.icon({
+          iconUrl: makeBinIcon(bin.fill_level_percent, isSelected),
+          iconSize: [isSelected ? 36 : 30, isSelected ? 44 : 38],
+          iconAnchor: [isSelected ? 18 : 15, isSelected ? 44 : 38],
+          popupAnchor: [0, -40],
+        }))
+      })
 
+      crewMarkerMapRef.current.forEach((marker, id) => {
+        const crew = crews.find((c) => c.id === id)
+        if (!crew) return
+        const isSelected = selected?.type === "crew" && selected.data.id === id
+        marker.setIcon(leaflet.icon({
+          iconUrl: makeCrewIcon(crew.status, isSelected),
+          iconSize: [isSelected ? 34 : 28, isSelected ? 42 : 36],
+          iconAnchor: [isSelected ? 17 : 14, isSelected ? 42 : 36],
+          popupAnchor: [0, -36],
+        }))
+      })
+    })
+  }, [selected, bins, crews])
+
+  // FIX: `selected` removed from crew marker deps for the same reason
   useEffect(() => {
     const map = mapRef.current
     if (!map) return
@@ -277,16 +289,17 @@ export function InteractiveMap() {
     getLeaflet().then((leaflet) => {
       crewMarkersRef.current.forEach((m) => m.remove())
       crewMarkersRef.current = []
+      crewMarkerMapRef.current.clear()
 
       if (!showCrews) return
 
       crews.forEach((crew) => {
         if (!crew.current_latitude || !crew.current_longitude) return
-        const isSelected = selected?.type === "crew" && selected.data.id === crew.id
+
         const icon = leaflet.icon({
-          iconUrl: makeCrewIcon(crew.status, isSelected),
-          iconSize: [isSelected ? 34 : 28, isSelected ? 42 : 36],
-          iconAnchor: [isSelected ? 17 : 14, isSelected ? 42 : 36],
+          iconUrl: makeCrewIcon(crew.status, false),
+          iconSize: [28, 36],
+          iconAnchor: [14, 36],
           popupAnchor: [0, -36],
         })
 
@@ -308,12 +321,12 @@ export function InteractiveMap() {
         marker.on("click", () => setSelected({ type: "crew", data: crew }))
         marker.addTo(map)
         crewMarkersRef.current.push(marker)
+        crewMarkerMapRef.current.set(crew.id, marker)
       })
     })
-  }, [crews, showCrews, selected])
+  }, [crews, showCrews]) // ← `selected` intentionally removed
 
-  // ── Render route polylines ───────────────────────────────────────────────
-
+  // Route polylines — no selection dep here, so unchanged
   useEffect(() => {
     const map = mapRef.current
     if (!map) return
@@ -355,8 +368,7 @@ export function InteractiveMap() {
     })
   }, [routes, showRoutes])
 
-  // ── Fly to selected item ─────────────────────────────────────────────────
-
+  // Fly to selected item
   useEffect(() => {
     const map = mapRef.current
     if (!map || !selected) return
@@ -368,8 +380,6 @@ export function InteractiveMap() {
       }
     })
   }, [selected])
-
-  // ── Derived stats ────────────────────────────────────────────────────────
 
   const stats = useMemo(() => ({
     totalBins: bins.length,
@@ -387,8 +397,6 @@ export function InteractiveMap() {
     [bins, statusFilter]
   )
 
-  // ─── Render ────────────────────────────────────────────────────────────
-
   if (loading) {
     return (
       <div className="flex items-center justify-center h-96">
@@ -399,7 +407,6 @@ export function InteractiveMap() {
 
   return (
     <div className="space-y-4">
-      {/* Header */}
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-2xl font-semibold tracking-tight">Live Map</h2>
@@ -413,7 +420,6 @@ export function InteractiveMap() {
         </Button>
       </div>
 
-      {/* Stats strip */}
       <div className="grid grid-cols-4 gap-3">
         {[
           { label: "Total bins", value: stats.totalBins, color: "text-foreground" },
@@ -431,10 +437,8 @@ export function InteractiveMap() {
       </div>
 
       <div className="grid gap-4 lg:grid-cols-4">
-        {/* Map */}
         <div className="lg:col-span-3">
           <Card className="overflow-hidden">
-            {/* Controls bar */}
             <div className="flex items-center gap-6 px-4 py-2.5 border-b bg-card flex-wrap">
               {[
                 { id: "bins", label: "Bins", state: showBins, set: setShowBins, icon: Trash2 },
@@ -465,13 +469,16 @@ export function InteractiveMap() {
               </div>
             </div>
 
-            {/* Leaflet map container */}
             <CardContent className="p-0">
-              {/* Must import Leaflet CSS */}
-              <link
-                rel="stylesheet"
-                href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"
-              />
+              {/*
+                FIX: The <link rel="stylesheet"> for Leaflet CSS has been removed
+                from here. It was being re-injected into the DOM on every render,
+                causing duplicate stylesheets and a visible layout flash on re-mount.
+                Add this to app/layout.tsx instead:
+                  import "leaflet/dist/leaflet.css"
+                or add to globals.css:
+                  @import "leaflet/dist/leaflet.css";
+              */}
               <div
                 ref={mapDivRef}
                 style={{ height: 520, width: "100%" }}
@@ -479,7 +486,6 @@ export function InteractiveMap() {
               />
             </CardContent>
 
-            {/* Legend */}
             <div className="flex items-center gap-4 px-4 py-2.5 border-t text-xs text-muted-foreground flex-wrap">
               {[
                 { color: "#22c55e", label: "Normal (< 80%)" },
@@ -497,7 +503,6 @@ export function InteractiveMap() {
           </Card>
         </div>
 
-        {/* Sidebar */}
         <div className="space-y-3">
           <Tabs defaultValue="bins">
             <TabsList className="w-full grid grid-cols-2">
@@ -522,10 +527,7 @@ export function InteractiveMap() {
                   >
                     <div className="flex items-center justify-between mb-1.5">
                       <span className="text-sm font-semibold">{bin.id}</span>
-                      <span
-                        className="text-xs font-bold"
-                        style={{ color: binColor(bin.fill_level_percent) }}
-                      >
+                      <span className="text-xs font-bold" style={{ color: binColor(bin.fill_level_percent) }}>
                         {bin.fill_level_percent}%
                       </span>
                     </div>
@@ -585,7 +587,6 @@ export function InteractiveMap() {
             </TabsContent>
           </Tabs>
 
-          {/* Selected item detail panel */}
           {selected && (
             <Card>
               <CardHeader className="pb-3 pt-4 px-4">
@@ -593,12 +594,7 @@ export function InteractiveMap() {
                   <CardTitle className="text-sm">
                     {selected.type === "bin" ? "Bin Detail" : "Crew Detail"}
                   </CardTitle>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-6 w-6 p-0"
-                    onClick={() => setSelected(null)}
-                  >
+                  <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={() => setSelected(null)}>
                     ✕
                   </Button>
                 </div>

@@ -25,15 +25,14 @@ import type { Auth, User, UserCredential } from "firebase/auth";
 
 // Plain config object — no SDK calls, safe to evaluate anywhere
 const firebaseConfig = {
-  apiKey:            process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
-  authDomain:        process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
-  projectId:         process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
-  storageBucket:     process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
-  messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
-  appId:             process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
-  measurementId:     process.env.NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID,
+  apiKey:"AIzaSyC9n8Xo2l3mLh0s1aZt7vVqjHkKJz5Xo",
+  authDomain:"sgm-project-fc254.firebaseapp.com",
+  projectId:"sgm-project-fc254",
+  storageBucket:"sgm-project-fc254.firebasestorage.app",
+  messagingSenderId:"589768864478",
+  appId:"1:589768864478:web:b8293c62152d91d89f084f",
+  measurementId:"G-5YWNJWRTKD",
 };
-
 // ─── Lazy singletons (browser-only, never called during SSR) ─────────────────
 
 let _app: FirebaseApp | null = null;

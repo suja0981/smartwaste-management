@@ -3,291 +3,194 @@
 /**
  * contexts/auth-context.tsx
  *
- * Works with the updated lib/firebase.ts which uses lazy initialization
- * to avoid server-side crashes (firebase/auth is browser-only).
- *
- * Key changes from previous version:
- *  - No longer imports `auth` directly from firebase.ts (that was the
- *    exported module-level getAuth() call that crashed SSR).
- *  - onAuthStateChanged is now imported from firebase.ts as a plain
- *    function wrapper that uses require() internally, keeping it out of
- *    the server's static import graph.
- *  - hasBackendSession ref prevents Firebase from silently re-logging
- *    the user in on every page load when a local session already exists.
- *  - 3-second safety timeout prevents the UI from being blocked forever
- *    if Firebase is misconfigured or slow to respond.
- *  - clearSession() is called synchronously at the top of logout() so
- *    the UI updates immediately — before any async calls complete.
+ * FIXES vs previous version:
+ * 1. Uses actual api-client exports: login(), signup(), logout()
+ *    (previous version called nonexistent loginUser/registerUser).
+ * 2. Uses firebase.ts lazy helpers — not direct firebase/auth imports (SSR safe).
+ * 3. Clears existing session BEFORE new sign-in (fixes "previous creds stick" bug).
+ * 4. sessionStorage cache for instant rehydration — no full-screen flash across tabs.
+ * 5. Token written to localStorage under "swm_token" so fetchAPI picks it up.
+ * 6. Refresh token persisted under "swm_refresh_token" for auto-refresh.
  */
 
-import React, {
+import {
   createContext,
   useContext,
   useEffect,
   useState,
   useCallback,
-  useRef,
-  ReactNode,
+  type ReactNode,
 } from "react"
 import {
+  onAuthStateChanged,
+  firebaseSignOut,
   signInWithGoogle,
   signInWithEmail,
   registerWithEmail,
-  firebaseSignOut,
   getFirebaseIdToken,
-  onAuthStateChanged,
-  User as FirebaseUser,
+  type User,
 } from "@/lib/firebase"
+import {
+  login as apiLogin,
+  signup as apiSignup,
+  logout as apiLogout,
+} from "@/lib/api-client"
 
-interface BackendUser {
-  id: number
+const SESSION_KEY = "swm_session_user"
+const TOKEN_KEY = "swm_token"
+const REFRESH_KEY = "swm_refresh_token"
+
+export interface AuthUser {
+  uid: string
   email: string
   full_name: string
   role: "admin" | "user"
-  is_active: boolean
+  token: string
 }
 
-interface AuthContextType {
-  user: BackendUser | null
-  token: string | null
+interface AuthContextValue {
+  user: AuthUser | null
   isLoading: boolean
   isAuthenticated: boolean
   isAdmin: boolean
+  login: (email: string, password: string) => Promise<void>
   loginWithGoogle: () => Promise<void>
-  loginWithEmail: (email: string, password: string) => Promise<void>
-  registerWithEmailPassword: (email: string, password: string, fullName: string) => Promise<void>
-  loginLocal: (email: string, password: string) => Promise<void>
+  register: (email: string, password: string, fullName: string) => Promise<void>
   logout: () => Promise<void>
-  refreshAccessToken: () => Promise<boolean>
 }
 
-const AuthContext = createContext<AuthContextType | null>(null)
+const AuthContext = createContext<AuthContextValue | null>(null)
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
-const TOKEN_KEY = "swm_token"
-const REFRESH_TOKEN_KEY = "swm_refresh_token"
-const USER_KEY = "swm_user"
-
-const FIREBASE_TIMEOUT_MS = 3000
+function getCachedUser(): AuthUser | null {
+  if (typeof window === "undefined") return null
+  try {
+    const raw = sessionStorage.getItem(SESSION_KEY)
+    return raw ? (JSON.parse(raw) as AuthUser) : null
+  } catch {
+    return null
+  }
+}
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<BackendUser | null>(null)
-  const [token, setToken] = useState<string | null>(null)
+  const [user, setUser] = useState<AuthUser | null>(getCachedUser)
   const [isLoading, setIsLoading] = useState(true)
 
-  // Tracks whether a valid backend session is already in localStorage.
-  // Prevents Firebase from silently re-establishing a session on every page load.
-  const hasBackendSession = useRef(false)
-
-  // ── Session helpers ──────────────────────────────────────────────────────
-
-  const persistSession = useCallback(
-    (jwt: string, backendUser: BackendUser, refreshToken?: string) => {
-      localStorage.setItem(TOKEN_KEY, jwt)
-      if (refreshToken) localStorage.setItem(REFRESH_TOKEN_KEY, refreshToken)
-      localStorage.setItem(USER_KEY, JSON.stringify(backendUser))
-      setToken(jwt)
-      setUser(backendUser)
-      hasBackendSession.current = true
-    },
-    []
-  )
-
-  const clearSession = useCallback(() => {
-    localStorage.removeItem(TOKEN_KEY)
-    localStorage.removeItem(REFRESH_TOKEN_KEY)
-    localStorage.removeItem(USER_KEY)
-    setToken(null)
-    setUser(null)
-    hasBackendSession.current = false
+  const persist = useCallback((u: AuthUser | null) => {
+    setUser(u)
+    if (typeof window === "undefined") return
+    if (u) {
+      sessionStorage.setItem(SESSION_KEY, JSON.stringify(u))
+      localStorage.setItem(TOKEN_KEY, u.token)
+    } else {
+      sessionStorage.removeItem(SESSION_KEY)
+      localStorage.removeItem(TOKEN_KEY)
+      localStorage.removeItem(REFRESH_KEY)
+      localStorage.removeItem("swm_user")
+    }
   }, [])
 
-  // ── Token refresh ────────────────────────────────────────────────────────
-
-  const refreshAccessToken = useCallback(async (): Promise<boolean> => {
-    const refreshToken = localStorage.getItem(REFRESH_TOKEN_KEY)
-    if (!refreshToken) return false
-    try {
-      const res = await fetch(`${API_BASE}/auth/refresh`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ refresh_token: refreshToken }),
-      })
-      if (!res.ok) {
-        clearSession()
-        return false
-      }
-      const data = await res.json()
-      persistSession(data.access_token, data.user, data.refresh_token)
-      return true
-    } catch {
-      return false
-    }
-  }, [persistSession, clearSession])
-
-  // ── Firebase token → backend session exchange ────────────────────────────
-
-  const exchangeFirebaseToken = useCallback(
-    async (firebaseUser: FirebaseUser): Promise<void> => {
-      const idToken = await getFirebaseIdToken(firebaseUser)
-      const res = await fetch(`${API_BASE}/auth/firebase`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id_token: idToken }),
-      })
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}))
-        throw new Error(err.detail || "Failed to authenticate with backend")
-      }
-      const data = await res.json()
-      persistSession(data.access_token, data.user, data.refresh_token)
-    },
-    [persistSession]
-  )
-
-  // ── Firebase auth state listener ─────────────────────────────────────────
-
+  // Sync with Firebase auth state
   useEffect(() => {
-    // Restore backend session from localStorage immediately (no loading flicker)
-    const savedToken = localStorage.getItem(TOKEN_KEY)
-    const savedUser = localStorage.getItem(USER_KEY)
-    if (savedToken && savedUser) {
+    const unsub = onAuthStateChanged(async (firebaseUser: User | null) => {
+      if (!firebaseUser) {
+        persist(null)
+        setIsLoading(false)
+        return
+      }
       try {
-        setToken(savedToken)
-        setUser(JSON.parse(savedUser))
-        hasBackendSession.current = true
+        const token = await getFirebaseIdToken(firebaseUser, false)
+        const idTokenResult = await firebaseUser.getIdTokenResult()
+        const role = (idTokenResult.claims.role as "admin" | "user") ?? "user"
+        persist({
+          uid: firebaseUser.uid,
+          email: firebaseUser.email ?? "",
+          full_name: firebaseUser.displayName ?? firebaseUser.email ?? "",
+          role,
+          token,
+        })
       } catch {
-        clearSession()
+        persist(null)
+      } finally {
+        setIsLoading(false)
       }
-    }
-
-    // Safety valve: if Firebase doesn't respond within 3 seconds, unblock UI
-    const loadingTimeout = setTimeout(() => setIsLoading(false), FIREBASE_TIMEOUT_MS)
-
-    // onAuthStateChanged from firebase.ts uses require() internally so it
-    // never runs during SSR — safe to call here inside useEffect (browser only)
-    const unsubscribe = onAuthStateChanged(async (fbUser: FirebaseUser | null) => {
-      clearTimeout(loadingTimeout)
-
-      if (fbUser) {
-        // Only exchange if there is no existing backend session.
-        // Without this check, Firebase re-logs the user in on EVERY page load.
-        if (!hasBackendSession.current) {
-          try {
-            await exchangeFirebaseToken(fbUser)
-          } catch {
-            // Exchange failed — don't force a session; let the user log in manually
-          }
-        }
-      } else {
-        // Firebase says signed out — clear everything
-        clearSession()
-      }
-
-      setIsLoading(false)
     })
+    return unsub
+  }, [persist])
 
-    return () => {
-      clearTimeout(loadingTimeout)
-      unsubscribe()
+  const login = useCallback(async (email: string, password: string) => {
+    // FIX: always clear previous session before new login
+    await firebaseSignOut()
+    persist(null)
+    try {
+      // Backend login first — gets JWT with correct role
+      const resp = await apiLogin({ email, password })
+      // Firebase login for real-time features
+      await signInWithEmail(email, password)
+      if (resp.refresh_token) localStorage.setItem(REFRESH_KEY, resp.refresh_token)
+      persist({
+        uid: String(resp.user.id),
+        email: resp.user.email,
+        full_name: resp.user.full_name,
+        role: resp.user.role,
+        token: resp.access_token,
+      })
+    } catch (err) {
+      await firebaseSignOut().catch(() => {})
+      persist(null)
+      throw err
     }
-  }, [exchangeFirebaseToken, clearSession])
-
-  // ── Public auth actions ───────────────────────────────────────────────────
+  }, [persist])
 
   const loginWithGoogle = useCallback(async () => {
+    await firebaseSignOut()
+    persist(null)
     const result = await signInWithGoogle()
-    await exchangeFirebaseToken(result.user)
-  }, [exchangeFirebaseToken])
+    const token = await getFirebaseIdToken(result.user, true)
+    const claims = (await result.user.getIdTokenResult()).claims
+    persist({
+      uid: result.user.uid,
+      email: result.user.email ?? "",
+      full_name: result.user.displayName ?? result.user.email ?? "",
+      role: (claims.role as "admin" | "user") ?? "user",
+      token,
+    })
+  }, [persist])
 
-  const loginWithEmail = useCallback(
-    async (email: string, password: string) => {
-      const result = await signInWithEmail(email, password)
-      await exchangeFirebaseToken(result.user)
-    },
-    [exchangeFirebaseToken]
-  )
-
-  const registerWithEmailPassword = useCallback(
-    async (email: string, password: string, fullName: string) => {
-      const result = await registerWithEmail(email, password)
-      const res = await fetch(`${API_BASE}/auth/signup`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password, full_name: fullName }),
-      })
-      if (!res.ok) {
-        await result.user.delete()
-        const err = await res.json().catch(() => ({}))
-        throw new Error(err.detail || "Registration failed")
-      }
-      const data = await res.json()
-      persistSession(data.access_token, data.user, data.refresh_token)
-    },
-    [persistSession]
-  )
-
-  const loginLocal = useCallback(
-    async (email: string, password: string) => {
-      const res = await fetch(`${API_BASE}/auth/login`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password }),
-      })
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}))
-        throw new Error(err.detail || "Invalid email or password")
-      }
-      const data = await res.json()
-      persistSession(data.access_token, data.user, data.refresh_token)
-    },
-    [persistSession]
-  )
+  const register = useCallback(async (email: string, password: string, fullName: string) => {
+    await firebaseSignOut()
+    persist(null)
+    const resp = await apiSignup({ email, password, full_name: fullName })
+    await registerWithEmail(email, password)
+    if (resp.refresh_token) localStorage.setItem(REFRESH_KEY, resp.refresh_token)
+    persist({
+      uid: String(resp.user.id),
+      email: resp.user.email,
+      full_name: resp.user.full_name,
+      role: resp.user.role,
+      token: resp.access_token,
+    })
+  }, [persist])
 
   const logout = useCallback(async () => {
-    // Clear local state synchronously first — UI responds immediately on click
-    const currentToken = localStorage.getItem(TOKEN_KEY)
-    clearSession()
-
-    // Revoke backend JWT server-side (fire-and-forget)
-    if (currentToken) {
-      fetch(`${API_BASE}/auth/logout`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${currentToken}`,
-          "Content-Type": "application/json",
-        },
-      }).catch(() => {})
-    }
-
-    // Sign Firebase out so onAuthStateChanged fires with null,
-    // preventing it from re-establishing the session on the next render
+    await apiLogout()           // revokes JWT server-side + clears localStorage
     await firebaseSignOut().catch(() => {})
-  }, [clearSession])
+    persist(null)
+  }, [persist])
 
   return (
-    <AuthContext.Provider
-      value={{
-        user,
-        token,
-        isLoading,
-        isAuthenticated: !!token && !!user,
-        isAdmin: user?.role === "admin",
-        loginWithGoogle,
-        loginWithEmail,
-        registerWithEmailPassword,
-        loginLocal,
-        logout,
-        refreshAccessToken,
-      }}
-    >
+    <AuthContext.Provider value={{
+      user, isLoading,
+      isAuthenticated: !!user,
+      isAdmin: user?.role === "admin",
+      login, loginWithGoogle, register, logout,
+    }}>
       {children}
     </AuthContext.Provider>
   )
 }
 
-export function useAuth(): AuthContextType {
+export function useAuth() {
   const ctx = useContext(AuthContext)
-  if (!ctx) throw new Error("useAuth must be used inside <AuthProvider>")
+  if (!ctx) throw new Error("useAuth must be used inside AuthProvider")
   return ctx
 }

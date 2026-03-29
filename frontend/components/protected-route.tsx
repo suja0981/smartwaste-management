@@ -1,86 +1,85 @@
 'use client'
 
-import { ReactNode, useEffect } from 'react'
+/**
+ * components/protected-route.tsx
+ *
+ * FIX: Removed `return null` — caused a blank frame between isLoading=false
+ * and router.replace('/login') completing, briefly showing the protected content.
+ * Now stays on the loading screen until redirect is fully in flight.
+ */
+
+import { type ReactNode, useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useAuth } from '@/contexts/auth-context'
-import { Card } from '@/components/ui/card'
+import { Loader2 } from 'lucide-react'
+
+function FullScreenLoader({ message = "Loading…" }: { message?: string }) {
+  return (
+    <div className="flex items-center justify-center min-h-screen bg-background">
+      <div className="flex flex-col items-center gap-3">
+        <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
+          <span className="text-lg font-bold text-primary">W</span>
+        </span>
+        <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+        <p className="text-sm text-muted-foreground">{message}</p>
+      </div>
+    </div>
+  )
+}
 
 export function ProtectedRoute({ children }: { children: ReactNode }) {
-    const { isAuthenticated, isLoading } = useAuth()
-    const router = useRouter()
+  const { isAuthenticated, isLoading } = useAuth()
+  const router = useRouter()
+  const [redirecting, setRedirecting] = useState(false)
 
-    useEffect(() => {
-        if (!isLoading && !isAuthenticated) {
-            router.replace('/login')
-        }
-    }, [isAuthenticated, isLoading, router])
-
-    if (isLoading) {
-        return (
-            <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-blue-50 to-indigo-50">
-                <Card className="p-8 shadow-lg">
-                    <div className="text-center space-y-4">
-                        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
-                        <p className="text-gray-600">Loading...</p>
-                    </div>
-                </Card>
-            </div>
-        )
+  useEffect(() => {
+    if (!isLoading && !isAuthenticated) {
+      setRedirecting(true)
+      router.replace('/login')
     }
+  }, [isAuthenticated, isLoading, router])
 
-    if (!isAuthenticated) {
-        return null
-    }
+  if (isLoading || redirecting || !isAuthenticated) {
+    return <FullScreenLoader />
+  }
 
-    return <>{children}</>
+  return <>{children}</>
 }
 
 export function AdminOnlyRoute({ children }: { children: ReactNode }) {
-    const { isAdmin, isLoading, isAuthenticated } = useAuth()
-    const router = useRouter()
+  const { isAdmin, isLoading, isAuthenticated } = useAuth()
+  const router = useRouter()
+  const [redirecting, setRedirecting] = useState(false)
 
-    useEffect(() => {
-        if (!isLoading && !isAuthenticated) {
-            router.replace('/login')
-        }
-    }, [isAuthenticated, isLoading, router])
-
-    if (isLoading) {
-        return (
-            <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-blue-50 to-indigo-50">
-                <Card className="p-8 shadow-lg">
-                    <div className="text-center space-y-4">
-                        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
-                        <p className="text-gray-600">Loading...</p>
-                    </div>
-                </Card>
-            </div>
-        )
+  useEffect(() => {
+    if (!isLoading && !isAuthenticated) {
+      setRedirecting(true)
+      router.replace('/login')
     }
+  }, [isAuthenticated, isLoading, router])
 
-    if (!isAuthenticated) {
-        return null
-    }
+  if (isLoading || redirecting) return <FullScreenLoader />
+  if (!isAuthenticated) return <FullScreenLoader />
 
-    if (!isAdmin) {
-        return (
-            <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-blue-50 to-indigo-50">
-                <Card className="p-8 shadow-lg max-w-md">
-                    <div className="text-center space-y-4">
-                        <h1 className="text-2xl font-bold text-red-600">Access Denied</h1>
-                        <p className="text-gray-600">You do not have permission to access this page.</p>
-                        <p className="text-sm text-gray-500">Admin access required.</p>
-                        <button
-                            onClick={() => router.push('/')}
-                            className="mt-4 px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
-                        >
-                            Go to Dashboard
-                        </button>
-                    </div>
-                </Card>
-            </div>
-        )
-    }
+  if (!isAdmin) {
+    return (
+      <div className="flex items-center justify-center min-h-screen bg-background">
+        <div className="text-center max-w-sm p-8 rounded-xl border bg-card shadow-sm space-y-4">
+          <div className="w-12 h-12 rounded-full bg-destructive/10 flex items-center justify-center mx-auto">
+            <span className="text-destructive font-bold text-xl">!</span>
+          </div>
+          <h1 className="text-xl font-semibold">Access Denied</h1>
+          <p className="text-muted-foreground text-sm">Admin access is required to view this page.</p>
+          <button
+            onClick={() => router.push('/')}
+            className="px-5 py-2 bg-primary text-primary-foreground rounded-lg text-sm font-medium hover:opacity-90 transition-opacity"
+          >
+            Go to Dashboard
+          </button>
+        </div>
+      </div>
+    )
+  }
 
-    return <>{children}</>
+  return <>{children}</>
 }

@@ -8,6 +8,7 @@ import { AuthProvider } from "@/contexts/auth-context"
 import { Toaster } from "@/components/ui/toaster"
 import { Suspense } from "react"
 import "./globals.css"
+import "leaflet/dist/leaflet.css"
 
 export const metadata: Metadata = {
   title: "Smart Waste Management Dashboard",
