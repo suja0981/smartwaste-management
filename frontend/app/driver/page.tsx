@@ -1,17 +1,14 @@
 'use client'
 
 /**
- * app/driver/page.tsx — Phase 4 Driver Mobile PWA
+ * app/driver/page.tsx — Driver Mobile PWA
  *
- * FIX: Added 'use client' — was missing, causing build crash because
- *      useState/useEffect/useRef/useCallback are client-only hooks.
- *
- * FIX: Uses the shared auth context instead of a separate localStorage key.
- *      Token is read from the shared 'swm_token' key set by the main auth flow.
- *      This means crew leaders log in via /login like everyone else.
- *
- * FIX: Replaced inline style objects with Tailwind classes where possible.
- *      Kept inline styles only for dynamic values (fill level width %).
+ * Fixes:
+ * 1. token now comes from useAuth().token (added to context) instead of
+ *    reading localStorage directly — avoids SSR mismatch
+ * 2. authHeaders memoized correctly — no stale token closure
+ * 3. GPS timer cleanup uses correct ref type
+ * 4. Tab badge z-index fixed (z-9 is not a valid Tailwind class → z-[9])
  */
 
 import { useEffect, useState, useCallback, useRef } from "react"
@@ -85,8 +82,8 @@ export default function DriverPage() {
   }, [isAuthenticated, isLoading, router])
 
   const authHeaders = useCallback(
-    () => ({
-      Authorization: `Bearer ${token}`,
+    (): Record<string, string> => ({
+      Authorization: `Bearer ${token ?? ""}`,
       "Content-Type": "application/json",
     }),
     [token]
@@ -113,11 +110,15 @@ export default function DriverPage() {
   // GPS updates while route is active
   useEffect(() => {
     if (!token || !route) {
-      if (gpsTimer.current) clearInterval(gpsTimer.current)
+      if (gpsTimer.current) {
+        clearInterval(gpsTimer.current)
+        gpsTimer.current = null
+      }
       return
     }
     const sendLocation = () => {
-      navigator.geolocation?.getCurrentPosition(
+      if (!navigator.geolocation) return
+      navigator.geolocation.getCurrentPosition(
         (pos) => {
           fetch(`${API}/driver/location`, {
             method: "POST",
@@ -133,7 +134,12 @@ export default function DriverPage() {
     }
     sendLocation()
     gpsTimer.current = setInterval(sendLocation, GPS_INTERVAL_MS)
-    return () => { if (gpsTimer.current) clearInterval(gpsTimer.current) }
+    return () => {
+      if (gpsTimer.current) {
+        clearInterval(gpsTimer.current)
+        gpsTimer.current = null
+      }
+    }
   }, [token, route, authHeaders])
 
   const completeTask = async (taskId: string) => {
@@ -173,13 +179,14 @@ export default function DriverPage() {
         <button
           onClick={fetchData}
           className="bg-white/20 text-white border-none rounded-lg px-3 py-1.5 text-lg cursor-pointer"
+          aria-label="Refresh"
         >
           ↻
         </button>
       </header>
 
       {/* Tabs */}
-      <nav className="flex bg-white border-b sticky top-14 z-9">
+      <nav className="flex bg-white border-b sticky top-14 z-[9]">
         {(["tasks", "route"] as const).map((t) => (
           <button
             key={t}
@@ -227,20 +234,20 @@ export default function DriverPage() {
                     />
                     <span className="font-bold text-sm flex-1">{task.title}</span>
                   </div>
-                  <p className="text-xs text-gray-500 m-0">📍 {task.location}</p>
+                  <p className="text-xs text-gray-500">📍 {task.location}</p>
                   {task.estimated_time_minutes && (
-                    <p className="text-xs text-gray-500 m-0">
+                    <p className="text-xs text-gray-500">
                       ⏱ ~{task.estimated_time_minutes} min
                     </p>
                   )}
                   {task.due_date && (
-                    <p className="text-xs text-gray-500 m-0">
+                    <p className="text-xs text-gray-500">
                       📅 Due: {new Date(task.due_date).toLocaleDateString()}
                     </p>
                   )}
                   <button
                     onClick={() => completeTask(task.id)}
-                    className="mt-1 w-full py-3 bg-green-500 text-white rounded-xl font-bold text-sm cursor-pointer border-none"
+                    className="mt-1 w-full py-3 bg-green-500 text-white rounded-xl font-bold text-sm cursor-pointer border-none active:opacity-80"
                   >
                     Mark Complete
                   </button>
@@ -290,7 +297,7 @@ export default function DriverPage() {
                         {wp.fill_level}%
                       </span>
                     </div>
-                    <p className="text-xs text-gray-500 m-0">📍 {wp.location}</p>
+                    <p className="text-xs text-gray-500">📍 {wp.location}</p>
                     <FillBar level={wp.fill_level} />
                     {wp.latitude && wp.longitude && (
                       <a

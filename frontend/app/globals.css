@@ -4,7 +4,6 @@
 @custom-variant dark (&:is(.dark *));
 
 /* ─── Design tokens ──────────────────────────────────────────────────────── */
-/* Single source of truth. DELETE frontend/styles/globals.css entirely.      */
 
 :root {
   --background: oklch(1 0 0);

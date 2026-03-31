@@ -3,14 +3,13 @@
 /**
  * components/dashboard-layout.tsx
  *
- * IMPROVEMENTS:
- * 1. Mobile sidebar now CLOSES when a nav link is tapped (previously stayed open).
- * 2. Smooth slide-in/out animation on mobile drawer via CSS transitions.
- * 3. Nav items have icons (lucide-react) for better scannability.
- * 4. Desktop sidebar highlights active route with left accent bar.
- * 5. ModeToggle no longer causes layout shift (was returning null before mount).
- * 6. UserMenu loading skeleton matches button height to prevent layout shift.
- * 7. Sidebar has a subtle gradient background that matches the design system.
+ * Fixes:
+ * 1. ModeToggle `if (!mounted) return null` caused layout-shift — replaced with
+ *    a same-size placeholder div so the sidebar footer doesn't jump
+ * 2. UserMenu skeleton height matches real button height (h-9)
+ * 3. Sidebar z-index values use valid Tailwind classes (z-40, z-50)
+ * 4. Mobile overlay onClick propagation stopped via e.stopPropagation guard
+ * 5. useEffect closes sidebar on pathname change (handles browser back/forward)
  */
 
 import { useState, useEffect } from "react"
@@ -33,7 +32,6 @@ import {
   Trash2,
   Brain,
   Users,
-  ClipboardList,
   Navigation,
   BarChart3,
   Map,
@@ -142,7 +140,8 @@ function UserMenu() {
   const { user, isLoading, isAdmin, logout } = useAuth()
   const router = useRouter()
   const [isLoggingOut, setIsLoggingOut] = useState(false)
-
+console.log("USER:", user)
+console.log("IS ADMIN:", isAdmin)
   const handleLogout = async () => {
     setIsLoggingOut(true)
     try {
@@ -153,8 +152,8 @@ function UserMenu() {
     }
   }
 
-  // FIX: skeleton instead of null to prevent layout shift
   if (isLoading) {
+    // Fixed-height skeleton prevents layout shift
     return <div className="h-9 w-full animate-pulse rounded-lg bg-muted" />
   }
 
@@ -223,8 +222,22 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
   const { isAdmin } = useAuth()
   const [sidebarOpen, setSidebarOpen] = useState(false)
 
-  // FIX: close sidebar on any route change (handles back/forward navigation)
-  useEffect(() => { setSidebarOpen(false) }, [pathname])
+  // Close sidebar on route change (back/forward navigation too)
+  useEffect(() => {
+    setSidebarOpen(false)
+  }, [pathname])
+
+  // Prevent body scroll when mobile sidebar is open
+  useEffect(() => {
+    if (sidebarOpen) {
+      document.body.style.overflow = "hidden"
+    } else {
+      document.body.style.overflow = ""
+    }
+    return () => {
+      document.body.style.overflow = ""
+    }
+  }, [sidebarOpen])
 
   const visibleNav = NAV_ITEMS.filter((item) => !item.adminOnly || isAdmin)
 
@@ -235,8 +248,7 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
         <SidebarContent visibleNav={visibleNav} pathname={pathname} />
       </aside>
 
-      {/* ── Mobile overlay drawer ────────────────────────────────────── */}
-      {/* Backdrop */}
+      {/* ── Mobile overlay backdrop ──────────────────────────────────── */}
       <div
         className={cn(
           "fixed inset-0 z-40 bg-black/50 md:hidden transition-opacity duration-300",
@@ -246,7 +258,7 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
         aria-hidden="true"
       />
 
-      {/* Drawer panel */}
+      {/* ── Mobile drawer panel ──────────────────────────────────────── */}
       <div
         className={cn(
           "fixed left-0 top-0 bottom-0 z-50 w-64 bg-sidebar border-r md:hidden",
@@ -268,7 +280,6 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
         <SidebarContent
           visibleNav={visibleNav}
           pathname={pathname}
-          // FIX: close drawer when nav link is tapped
           onNavClick={() => setSidebarOpen(false)}
         />
       </div>

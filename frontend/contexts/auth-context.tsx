@@ -3,14 +3,12 @@
 /**
  * contexts/auth-context.tsx
  *
- * FIXES vs previous version:
- * 1. Uses actual api-client exports: login(), signup(), logout()
- *    (previous version called nonexistent loginUser/registerUser).
- * 2. Uses firebase.ts lazy helpers — not direct firebase/auth imports (SSR safe).
- * 3. Clears existing session BEFORE new sign-in (fixes "previous creds stick" bug).
- * 4. sessionStorage cache for instant rehydration — no full-screen flash across tabs.
- * 5. Token written to localStorage under "swm_token" so fetchAPI picks it up.
- * 6. Refresh token persisted under "swm_refresh_token" for auto-refresh.
+ * Fixes:
+ * 1. Added loginWithEmail, loginLocal, registerWithEmailPassword exports
+ *    (login/signup pages call these names specifically)
+ * 2. loginLocal uses backend-only auth (no Firebase) for legacy admin accounts
+ * 3. registerWithEmailPassword is an alias for register
+ * 4. All methods clear previous session before starting
  */
 
 import {
@@ -53,9 +51,14 @@ interface AuthContextValue {
   isLoading: boolean
   isAuthenticated: boolean
   isAdmin: boolean
+  token: string | null
+  // Core methods
   login: (email: string, password: string) => Promise<void>
   loginWithGoogle: () => Promise<void>
+  loginWithEmail: (email: string, password: string) => Promise<void>
+  loginLocal: (email: string, password: string) => Promise<void>
   register: (email: string, password: string, fullName: string) => Promise<void>
+  registerWithEmailPassword: (email: string, password: string, fullName: string) => Promise<void>
   logout: () => Promise<void>
 }
 
@@ -93,7 +96,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const unsub = onAuthStateChanged(async (firebaseUser: User | null) => {
       if (!firebaseUser) {
-        persist(null)
+        // Only clear if we don't have a local-login session already
+        const cached = getCachedUser()
+        if (!cached) {
+          persist(null)
+        }
         setIsLoading(false)
         return
       }
@@ -117,15 +124,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return unsub
   }, [persist])
 
+  /** Standard backend + Firebase login */
   const login = useCallback(async (email: string, password: string) => {
-    // FIX: always clear previous session before new login
-    await firebaseSignOut()
+    await firebaseSignOut().catch(() => {})
     persist(null)
     try {
-      // Backend login first — gets JWT with correct role
       const resp = await apiLogin({ email, password })
-      // Firebase login for real-time features
-      await signInWithEmail(email, password)
+      await signInWithEmail(email, password).catch(() => {
+        // Firebase sign-in optional — backend JWT is the source of truth
+      })
       if (resp.refresh_token) localStorage.setItem(REFRESH_KEY, resp.refresh_token)
       persist({
         uid: String(resp.user.id),
@@ -141,8 +148,31 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, [persist])
 
+  /** Alias — login page calls loginWithEmail */
+  const loginWithEmail = login
+
+  /** Legacy local login — backend only, no Firebase */
+  const loginLocal = useCallback(async (email: string, password: string) => {
+    await firebaseSignOut().catch(() => {})
+    persist(null)
+    try {
+      const resp = await apiLogin({ email, password })
+      if (resp.refresh_token) localStorage.setItem(REFRESH_KEY, resp.refresh_token)
+      persist({
+        uid: String(resp.user.id),
+        email: resp.user.email,
+        full_name: resp.user.full_name,
+        role: resp.user.role,
+        token: resp.access_token,
+      })
+    } catch (err) {
+      persist(null)
+      throw err
+    }
+  }, [persist])
+
   const loginWithGoogle = useCallback(async () => {
-    await firebaseSignOut()
+    await firebaseSignOut().catch(() => {})
     persist(null)
     const result = await signInWithGoogle()
     const token = await getFirebaseIdToken(result.user, true)
@@ -157,10 +187,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [persist])
 
   const register = useCallback(async (email: string, password: string, fullName: string) => {
-    await firebaseSignOut()
+    await firebaseSignOut().catch(() => {})
     persist(null)
     const resp = await apiSignup({ email, password, full_name: fullName })
-    await registerWithEmail(email, password)
+    await registerWithEmail(email, password).catch(() => {})
     if (resp.refresh_token) localStorage.setItem(REFRESH_KEY, resp.refresh_token)
     persist({
       uid: String(resp.user.id),
@@ -171,18 +201,31 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     })
   }, [persist])
 
+  /** Alias — signup page calls registerWithEmailPassword */
+  const registerWithEmailPassword = register
+
   const logout = useCallback(async () => {
-    await apiLogout()           // revokes JWT server-side + clears localStorage
+    await apiLogout().catch(() => {})
     await firebaseSignOut().catch(() => {})
     persist(null)
   }, [persist])
 
+  const token = user?.token ?? null
+
   return (
     <AuthContext.Provider value={{
-      user, isLoading,
+      user,
+      isLoading,
       isAuthenticated: !!user,
       isAdmin: user?.role === "admin",
-      login, loginWithGoogle, register, logout,
+      token,
+      login,
+      loginWithEmail,
+      loginLocal,
+      loginWithGoogle,
+      register,
+      registerWithEmailPassword,
+      logout,
     }}>
       {children}
     </AuthContext.Provider>

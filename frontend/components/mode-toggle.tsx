@@ -1,9 +1,17 @@
 "use client"
 
+/**
+ * components/mode-toggle.tsx
+ *
+ * Fix: `if (!mounted) return null` caused a layout shift on every page load
+ * because the sidebar footer would reflow once the component mounted.
+ * Now returns an invisible same-size placeholder before mounting so layout
+ * stays stable during hydration.
+ */
+
 import { useEffect, useState } from "react"
 import { Moon, Sun } from "lucide-react"
 import { useTheme } from "next-themes"
-
 import { Button } from "@/components/ui/button"
 import {
   DropdownMenu,
@@ -20,13 +28,15 @@ export function ModeToggle() {
     setMounted(true)
   }, [])
 
-  // 🚨 Prevent hydration issues
-  if (!mounted) return null
+  // Render invisible placeholder with same dimensions to avoid layout shift
+  if (!mounted) {
+    return <Button variant="ghost" size="sm" className="invisible" aria-hidden="true" tabIndex={-1}><Sun className="h-[1.2rem] w-[1.2rem]" /></Button>
+  }
 
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="ghost" size="sm" className="relative">
+        <Button variant="ghost" size="sm" className="relative" aria-label="Toggle theme">
           <Sun className="h-[1.2rem] w-[1.2rem] transition-all dark:scale-0" />
           <Moon className="absolute h-[1.2rem] w-[1.2rem] scale-0 transition-all dark:scale-100" />
         </Button>

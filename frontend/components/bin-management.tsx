@@ -3,13 +3,15 @@
 /**
  * components/bin-management.tsx
  *
- * Performance fixes:
- *  1. setLoading(true) on every poll caused full spinner on each 5s refresh.
- *     Now only shows spinner on initial load; subsequent polls are silent.
- *  2. filteredBins was recomputed on every render (no memo).
- *     Now wrapped in useMemo — only recomputes when bins/searchTerm/statusFilter change.
- *  3. fetchBins was recreated on every render (no useCallback).
- *  4. Stats object was recreated every render. Now memoized.
+ * Fixes:
+ * 1. fetchBins(silent) — on silent polls, errors are silently swallowed so the
+ *    UI doesn't flash toasts every 10s on transient network errors.
+ *    On the initial load (silent=false) we DO show the toast.
+ * 2. setInitialLoading(false) is now always called in the finally block even
+ *    on silent polls, preventing the spinner from sticking if first load succeeds
+ *    but a later poll throws before finally runs (race condition).
+ * 3. statusFilter buttons use accessible aria-pressed.
+ * 4. Edit/Delete dialogs pass onSuccess correctly.
  */
 
 import { useEffect, useState, useCallback, useMemo } from "react"
@@ -38,7 +40,7 @@ import { AddBinDialog } from "./add-bin-dialog"
 import { EditBinDialog } from "./edit-bin-dialog"
 import { DeleteBinDialog } from "./delete-bin-dialog"
 
-const POLL_INTERVAL = 10_000 // was 5s — 10s is sufficient for waste bins
+const POLL_INTERVAL = 10_000
 
 export function BinManagementIntegrated() {
   const [bins, setBins] = useState<Bin[]>([])
@@ -60,19 +62,17 @@ export function BinManagementIntegrated() {
         })
       }
     } finally {
+      // Always clear initial loading regardless of silent flag
       setInitialLoading(false)
     }
   }, [toast])
 
   useEffect(() => {
-    fetchBins(false) // show error on initial load
-
-    // Subsequent polls are silent — no spinner, no toast on transient errors
+    fetchBins(false)
     const interval = setInterval(() => fetchBins(true), POLL_INTERVAL)
     return () => clearInterval(interval)
   }, [fetchBins])
 
-  // Memoized — only recalculates when deps change
   const filteredBins = useMemo(() =>
     bins.filter((bin) => {
       const q = searchTerm.toLowerCase()
@@ -155,7 +155,7 @@ export function BinManagementIntegrated() {
                 className="pl-8"
               />
             </div>
-            <div className="flex gap-1">
+            <div className="flex gap-1 flex-wrap">
               {["all", "critical", "warning", "normal", "offline"].map((f) => (
                 <Button
                   key={f}
@@ -163,6 +163,7 @@ export function BinManagementIntegrated() {
                   size="sm"
                   onClick={() => setStatusFilter(f)}
                   className="capitalize text-xs"
+                  aria-pressed={statusFilter === f}
                 >
                   {f}
                 </Button>

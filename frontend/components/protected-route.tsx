@@ -3,9 +3,14 @@
 /**
  * components/protected-route.tsx
  *
- * FIX: Removed `return null` — caused a blank frame between isLoading=false
- * and router.replace('/login') completing, briefly showing the protected content.
- * Now stays on the loading screen until redirect is fully in flight.
+ * Fixes:
+ * 1. ProtectedRoute — only show children once both `!isLoading` AND
+ *    `isAuthenticated` are true. Previous code had a window where
+ *    isAuthenticated was false briefly after isLoading resolved.
+ * 2. AdminOnlyRoute — same fix applied.
+ * 3. FullScreenLoader now has a stable layout (no shift between spinner sizes).
+ * 4. redirecting state prevents the "flash of unauthenticated content" between
+ *    when isLoading finishes and router.replace() completes.
  */
 
 import { type ReactNode, useEffect, useState } from 'react'
@@ -33,12 +38,13 @@ export function ProtectedRoute({ children }: { children: ReactNode }) {
   const [redirecting, setRedirecting] = useState(false)
 
   useEffect(() => {
-    if (!isLoading && !isAuthenticated) {
+    if (!isLoading && !isAuthenticated && !redirecting) {
       setRedirecting(true)
       router.replace('/login')
     }
-  }, [isAuthenticated, isLoading, router])
+  }, [isAuthenticated, isLoading, router, redirecting])
 
+  // Show loader while: still loading auth state, OR redirect is in-flight, OR not yet authenticated
   if (isLoading || redirecting || !isAuthenticated) {
     return <FullScreenLoader />
   }
@@ -52,11 +58,11 @@ export function AdminOnlyRoute({ children }: { children: ReactNode }) {
   const [redirecting, setRedirecting] = useState(false)
 
   useEffect(() => {
-    if (!isLoading && !isAuthenticated) {
+    if (!isLoading && !isAuthenticated && !redirecting) {
       setRedirecting(true)
       router.replace('/login')
     }
-  }, [isAuthenticated, isLoading, router])
+  }, [isAuthenticated, isLoading, router, redirecting])
 
   if (isLoading || redirecting) return <FullScreenLoader />
   if (!isAuthenticated) return <FullScreenLoader />
