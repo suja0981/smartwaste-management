@@ -16,7 +16,7 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
-# env files
+# env files (root .gitignore covers .env; keep local override entries)
 .env*
 
 # vercel
@@ -25,4 +25,3 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
-backend/firebase-service-account.json.json
