@@ -73,6 +73,7 @@ class Bin(BaseModel):
     status: str = Field(default="ok", description="ok | warning | full | offline | maintenance")
     latitude: Optional[float] = None
     longitude: Optional[float] = None
+    zone_id: Optional[str] = None
 
 
 class CreateBinRequest(BaseModel):
@@ -117,6 +118,7 @@ class Crew(BaseModel):
     current_location: Optional[str] = None
     current_latitude: Optional[float] = None
     current_longitude: Optional[float] = None
+    zone_id: Optional[str] = None
     created_at: datetime
 
 
@@ -248,6 +250,6 @@ class RouteComparison(BaseModel):
 
 
 class UpdateRouteStatusRequest(BaseModel):
-    status: str   # planned | active | completed | cancelled
+    status: str   # planned | active | paused | completed | cancelled
     actual_time_minutes: Optional[float] = None
     notes: Optional[str] = None

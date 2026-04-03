@@ -18,19 +18,35 @@ New coverage added:
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 from datetime import datetime, timezone
+import os
 
 from main import app
 from database import Base, get_db, UserDB
 from passlib.context import CryptContext
 
 # ─── Test database setup ──────────────────────────────────────────────────────
+# Uses a dedicated test database so real data is never touched.
+# All data is wiped (tables dropped & recreated) before each test session.
+# Set TEST_DATABASE_URL in your environment to override.
 
-SQLALCHEMY_TEST_DATABASE_URL = "sqlite:///:memory:"
-engine = create_engine(SQLALCHEMY_TEST_DATABASE_URL, connect_args={"check_same_thread": False})
+SQLALCHEMY_TEST_DATABASE_URL = os.getenv(
+    "TEST_DATABASE_URL",
+    "postgresql://waste_user:waste_password_dev@localhost:5432/smart_waste_test",
+)
+engine = create_engine(
+    SQLALCHEMY_TEST_DATABASE_URL,
+    pool_size=5,
+    max_overflow=10,
+    pool_pre_ping=True,
+)
+
+# Drop and recreate all tables at the start of each test session for a clean slate
+Base.metadata.drop_all(bind=engine)
 Base.metadata.create_all(bind=engine)
+
 TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
@@ -211,7 +227,7 @@ class TestAuth:
 
     def test_me_requires_auth(self):
         r = client.get("/auth/me")
-        assert r.status_code == 403
+        assert r.status_code == 401
 
     def test_me_with_auth(self, auth_headers):
         r = client.get("/auth/me", headers=auth_headers)
@@ -757,7 +773,7 @@ class TestDriverRouter:
     @pytest.fixture(scope="class")
     def driver_token(self):
         """Create a user whose email matches a crew, simulating a crew leader."""
-        crew_email = "driver_crew@waste.test"
+        crew_email = "driver_crew@example.com"
         db = TestingSessionLocal()
 
         # Create matching crew

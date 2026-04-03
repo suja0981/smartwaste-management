@@ -1,297 +1,360 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useState, useCallback } from "react"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { useToast } from "@/hooks/use-toast"
+import { useAuth } from "@/contexts/auth-context"
 import {
     getAllPredictions,
     getPredictedAlerts,
-    type FillPrediction,
-    type PredictedAlert,
-    type MLStats,
+    syncPredictionTasks,
 } from "@/lib/api-client"
 import {
     TrendingUp,
-    AlertTriangle,
-    Clock,
     RefreshCw,
     Loader2,
     Zap,
+    Brain,
+    ChevronUp,
+    ChevronDown,
+    Minus,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 
-export function PredictionOverview() {
-    const [predictions, setPredictions] = useState<FillPrediction[]>([])
-    const [predictedAlerts, setPredictedAlerts] = useState<PredictedAlert[]>([])
-    const [loading, setLoading] = useState(true)
-    const [timeframe, setTimeframe] = useState(24) // hours
-    const { toast } = useToast()
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 
-    const fetchPredictions = async () => {
+function fillLevelConfig(fill: number) {
+    if (fill >= 80) return { color: "text-red-600", bar: "bg-red-500", variant: "destructive" as const }
+    if (fill >= 50) return { color: "text-amber-600", bar: "bg-amber-500", variant: "secondary" as const }
+    return { color: "text-green-600", bar: "bg-green-500", variant: "outline" as const }
+}
+
+function formatHours(h: number) {
+    if (h < 1) return `${Math.round(h * 60)}m`
+    if (h < 24) return `${h.toFixed(1)}h`
+    return `${(h / 24).toFixed(1)}d`
+}
+
+// ─── Timeframe toggle ─────────────────────────────────────────────────────────
+
+const TIMEFRAMES = [12, 24, 48] as const
+
+interface TimeframeToggleProps {
+    value: number
+    onChange: (v: number) => void
+    loading: boolean
+    onRefresh: () => void
+}
+
+function TimeframeToggle({ value, onChange, loading, onRefresh }: TimeframeToggleProps) {
+    return (
+        <div className="flex items-center gap-1">
+            {TIMEFRAMES.map((t) => (
+                <button
+                    key={t}
+                    onClick={() => onChange(t)}
+                    className={cn(
+                        "px-3 py-1.5 text-xs font-semibold rounded-md transition-all",
+                        value === t
+                            ? "bg-foreground text-background shadow-sm"
+                            : "text-muted-foreground hover:text-foreground hover:bg-muted"
+                    )}
+                >
+                    {t}h
+                </button>
+            ))}
+            <button
+                onClick={onRefresh}
+                disabled={loading}
+                className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-all ml-1"
+                title="Refresh"
+            >
+                <RefreshCw className={cn("h-3.5 w-3.5", loading && "animate-spin")} />
+            </button>
+        </div>
+    )
+}
+
+// ─── Main Component ───────────────────────────────────────────────────────────
+
+export function PredictionOverview() {
+    const [syncingTasks, setSyncingTasks] = useState(false)
+    const [lastSyncMessage, setLastSyncMessage] = useState("")
+    const [timeframe, setTimeframe] = useState(24)
+    const [sortBy, setSortBy] = useState<"fill" | "rate" | "time">("fill")
+    const [sortDir, setSortDir] = useState<"asc" | "desc">("desc")
+    const { toast } = useToast()
+    const { isAdmin } = useAuth()
+    const queryClient = useQueryClient()
+
+    const { data: predsRes, isLoading: predsLoading, isFetching: predsFetching } = useQuery({
+        queryKey: ["predictions"],
+        queryFn: getAllPredictions,
+        refetchInterval: 30_000,
+        staleTime: 15_000,
+    })
+
+    const { data: alertsRes, isLoading: alertsLoading, isFetching: alertsFetching } = useQuery({
+        queryKey: ["predicted-alerts", timeframe],
+        queryFn: () => getPredictedAlerts(timeframe),
+        refetchInterval: 30_000,
+        staleTime: 15_000,
+    })
+
+    const predictions = predsRes?.predictions ?? []
+    const alerts = alertsRes?.alerts ?? []
+    const loading = predsLoading || alertsLoading
+    const refreshing = predsFetching || alertsFetching
+
+    function handleRefresh() {
+        queryClient.invalidateQueries({ queryKey: ["predictions"] })
+        queryClient.invalidateQueries({ queryKey: ["predicted-alerts", timeframe] })
+    }
+
+    // ── Derived values ────────────────────────────────────────────────────────
+
+    const sortedPredictions = [...predictions].sort((a, b) => {
+        let va = 0, vb = 0
+        if (sortBy === "fill") { va = a.current_fill ?? 0; vb = b.current_fill ?? 0 }
+        if (sortBy === "rate") { va = a.fill_rate_per_hour ?? 0; vb = b.fill_rate_per_hour ?? 0 }
+        if (sortBy === "time") { va = a.hours_until_full ?? Infinity; vb = b.hours_until_full ?? Infinity }
+        return sortDir === "desc" ? vb - va : va - vb
+    })
+
+    function toggleSort(col: typeof sortBy) {
+        if (sortBy === col) setSortDir((d) => (d === "asc" ? "desc" : "asc"))
+        else { setSortBy(col); setSortDir("desc") }
+    }
+
+    function SortIcon({ col }: { col: typeof sortBy }) {
+        if (sortBy !== col) return <Minus className="h-3 w-3 opacity-30" />
+        return sortDir === "desc"
+            ? <ChevronDown className="h-3 w-3" />
+            : <ChevronUp className="h-3 w-3" />
+    }
+
+    const handleSyncPredictionTasks = useCallback(async () => {
+        setSyncingTasks(true)
         try {
-            setLoading(true)
-            const [allPreds, alerts] = await Promise.all([
-                getAllPredictions(),
-                getPredictedAlerts(timeframe),
-            ])
-            setPredictions(allPreds.predictions || [])
-            setPredictedAlerts(alerts.alerts || [])
+            const result = await syncPredictionTasks(timeframe)
+            const summary = `${result.created} created, ${result.updated} refreshed, ${result.skipped_existing} already open`
+            setLastSyncMessage(summary)
+            toast({
+                title: "Prediction tasks synced",
+                description: summary,
+            })
         } catch (error) {
             toast({
-                title: "Error",
-                description: error instanceof Error ? error.message : "Failed to load predictions",
+                title: "Prediction task sync failed",
+                description: error instanceof Error ? error.message : "Could not create tasks from predicted alerts.",
                 variant: "destructive",
             })
         } finally {
-            setLoading(false)
+            setSyncingTasks(false)
         }
-    }
+    }, [timeframe, toast])
 
-    useEffect(() => {
-        fetchPredictions()
-    }, [timeframe])
+    // ── Loading state ─────────────────────────────────────────────────────────
 
     if (loading) {
         return (
-            <div className="flex items-center justify-center h-64">
+            <div className="flex flex-col items-center justify-center gap-3 h-64 text-muted-foreground">
                 <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                <p className="text-sm">Loading ML predictions…</p>
             </div>
         )
     }
 
-    const criticalAlerts = predictedAlerts.filter((a) => a.urgency === "high")
-    const highFillBins = predictions.filter((p) => p.current_fill! >= 80)
+    // ── Render ────────────────────────────────────────────────────────────────
 
     return (
         <div className="space-y-6">
-            {/* Summary Cards */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <Card>
-                    <CardHeader className="pb-2">
-                        <CardTitle className="text-sm font-medium text-muted-foreground">
-                            Total Bins Tracked
-                        </CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                        <div className="text-2xl font-bold">{predictions.length}</div>
-                        <p className="text-xs text-muted-foreground mt-1">
-                            With fill predictions
-                        </p>
-                    </CardContent>
-                </Card>
 
-                <Card>
-                    <CardHeader className="pb-2">
-                        <CardTitle className="text-sm font-medium text-muted-foreground">
-                            High Fill Level
-                        </CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                        <div className="text-2xl font-bold text-amber-600">{highFillBins.length}</div>
-                        <p className="text-xs text-muted-foreground mt-1">
-                            Bins above 80% capacity
-                        </p>
-                    </CardContent>
-                </Card>
-
-                <Card>
-                    <CardHeader className="pb-2">
-                        <CardTitle className="text-sm font-medium text-muted-foreground">
-                            Critical Alerts
-                        </CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                        <div className={cn(
-                            "text-2xl font-bold",
-                            criticalAlerts.length > 0 ? "text-red-600" : "text-green-600"
-                        )}>
-                            {criticalAlerts.length}
-                        </div>
-                        <p className="text-xs text-muted-foreground mt-1">
-                            Next {timeframe} hours
-                        </p>
-                    </CardContent>
-                </Card>
-            </div>
-
-            {/* Predicted Alerts Section */}
+            {/* ── All Fill Predictions Table ─────────────────────────────────── */}
             <Card>
-                <CardHeader>
-                    <div className="flex items-center justify-between">
-                        <div>
-                            <CardTitle className="flex items-center gap-2">
-                                <AlertTriangle className="h-5 w-5" />
-                                Predicted Collection Alerts
-                            </CardTitle>
-                            <CardDescription>
-                                Bins predicted to reach full capacity in the next {timeframe} hours
-                            </CardDescription>
+                <CardHeader className="pb-4">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                        <div className="flex items-center gap-3">
+                            <div className="p-2 rounded-lg bg-blue-100 dark:bg-blue-900/30">
+                                <TrendingUp className="h-4 w-4 text-blue-600" />
+                            </div>
+                            <div>
+                                <CardTitle className="text-base">All Fill Predictions</CardTitle>
+                                <CardDescription className="text-xs mt-0.5">
+                                    Click column headers to sort · {predictions.length} active predictions
+                                </CardDescription>
+                            </div>
                         </div>
-                        <div className="flex gap-2">
-                            <Button
-                                size="sm"
-                                variant={timeframe === 12 ? "default" : "outline"}
-                                onClick={() => setTimeframe(12)}
-                            >
-                                12h
-                            </Button>
-                            <Button
-                                size="sm"
-                                variant={timeframe === 24 ? "default" : "outline"}
-                                onClick={() => setTimeframe(24)}
-                            >
-                                24h
-                            </Button>
-                            <Button
-                                size="sm"
-                                variant={timeframe === 48 ? "default" : "outline"}
-                                onClick={() => setTimeframe(48)}
-                            >
-                                48h
-                            </Button>
-                            <Button
-                                size="sm"
-                                variant="ghost"
-                                onClick={fetchPredictions}
-                            >
-                                <RefreshCw className="h-4 w-4" />
-                            </Button>
+                        <div className="flex flex-wrap items-center gap-2">
+                            {isAdmin && (
+                                <Button
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={handleSyncPredictionTasks}
+                                    disabled={syncingTasks}
+                                >
+                                    {syncingTasks ? (
+                                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                    ) : (
+                                        <Zap className="mr-2 h-4 w-4" />
+                                    )}
+                                    Create Tasks
+                                </Button>
+                            )}
+                            <TimeframeToggle
+                                value={timeframe}
+                                onChange={setTimeframe}
+                                loading={refreshing}
+                                onRefresh={handleRefresh}
+                            />
                         </div>
                     </div>
+                    {lastSyncMessage && (
+                        <p className="pt-2 text-xs text-muted-foreground">
+                            Latest task sync: {lastSyncMessage}
+                        </p>
+                    )}
                 </CardHeader>
-                <CardContent>
-                    {predictedAlerts.length > 0 ? (
-                        <div className="space-y-3">
-                            {predictedAlerts.map((alert) => (
-                                <div
-                                    key={alert.bin_id}
-                                    className={cn(
-                                        "p-4 rounded-lg border-l-4",
-                                        alert.urgency === "high"
-                                            ? "border-l-red-500 bg-red-50"
-                                            : "border-l-amber-500 bg-amber-50"
-                                    )}
-                                >
-                                    <div className="flex items-start justify-between">
-                                        <div className="flex-1">
-                                            <div className="flex items-center gap-2 mb-1">
-                                                <p className="font-semibold">{alert.bin_id}</p>
-                                                <Badge
-                                                    variant={
-                                                        alert.urgency === "high" ? "destructive" : "secondary"
-                                                    }
-                                                >
-                                                    {alert.urgency.toUpperCase()}
-                                                </Badge>
-                                            </div>
-                                            <p className="text-sm text-muted-foreground">
-                                                📍 {alert.location}
-                                            </p>
-                                            <p className="text-sm mt-2">
-                                                Currently at <strong>{alert.current_fill}%</strong> • Will be
-                                                full in <strong>{alert.hours_until_full.toFixed(1)}h</strong>
-                                            </p>
-                                            <p className="text-xs text-muted-foreground mt-1">
-                                                Predicted full time:{" "}
-                                                {new Date(alert.predicted_time).toLocaleString()}
-                                            </p>
-                                        </div>
-                                        <Clock className={cn(
-                                            "h-5 w-5 flex-shrink-0",
-                                            alert.urgency === "high" ? "text-red-600" : "text-amber-600"
-                                        )} />
-                                    </div>
-                                </div>
-                            ))}
+                <CardContent className="pt-0">
+                    {sortedPredictions.length > 0 ? (
+                        <div className="rounded-lg border overflow-hidden">
+                            <table className="w-full text-sm">
+                                <thead>
+                                    <tr className="border-b bg-muted/40 text-xs uppercase tracking-wide text-muted-foreground">
+                                        <th className="text-left py-2.5 px-4 font-medium">Bin ID</th>
+                                        <th className="text-left py-2.5 px-4 font-medium">
+                                            <button
+                                                onClick={() => toggleSort("fill")}
+                                                className="flex items-center gap-1 hover:text-foreground transition-colors"
+                                            >
+                                                Fill Level <SortIcon col="fill" />
+                                            </button>
+                                        </th>
+                                        <th className="text-left py-2.5 px-4 font-medium hidden md:table-cell">
+                                            <button
+                                                onClick={() => toggleSort("rate")}
+                                                className="flex items-center gap-1 hover:text-foreground transition-colors"
+                                            >
+                                                Fill Rate <SortIcon col="rate" />
+                                            </button>
+                                        </th>
+                                        <th className="text-left py-2.5 px-4 font-medium">
+                                            <button
+                                                onClick={() => toggleSort("time")}
+                                                className="flex items-center gap-1 hover:text-foreground transition-colors"
+                                            >
+                                                Time to Full <SortIcon col="time" />
+                                            </button>
+                                        </th>
+                                        <th className="text-left py-2.5 px-4 font-medium hidden lg:table-cell">
+                                            Confidence
+                                        </th>
+                                        <th className="text-left py-2.5 px-4 font-medium hidden lg:table-cell">
+                                            Data Points
+                                        </th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {sortedPredictions.map((pred, idx) => {
+                                        const fill = pred.current_fill ?? 0
+                                        const fillCfg = fillLevelConfig(fill)
+                                        const hours = pred.hours_until_full
+                                        const timeClass =
+                                            hours == null
+                                                ? "text-muted-foreground"
+                                                : hours <= 6
+                                                    ? "text-red-600 font-semibold"
+                                                    : hours <= 12
+                                                        ? "text-amber-600 font-semibold"
+                                                        : "text-muted-foreground"
+                                        const conf = (pred.confidence ?? 0) * 100
+
+                                        return (
+                                            <tr
+                                                key={pred.bin_id}
+                                                className={cn(
+                                                    "border-b last:border-0 transition-colors hover:bg-muted/30",
+                                                    idx % 2 === 0 ? "bg-transparent" : "bg-muted/10"
+                                                )}
+                                            >
+                                                {/* Bin ID */}
+                                                <td className="py-3 px-4 font-mono font-medium text-xs">
+                                                    {pred.bin_id}
+                                                </td>
+
+                                                {/* Fill level with mini bar */}
+                                                <td className="py-3 px-4">
+                                                    <div className="flex items-center gap-2">
+                                                        <div className="w-16 h-1.5 rounded-full bg-gray-100 shrink-0 hidden sm:block">
+                                                            <div
+                                                                className={cn("h-1.5 rounded-full transition-all", fillCfg.bar)}
+                                                                style={{ width: `${fill}%` }}
+                                                            />
+                                                        </div>
+                                                        <span className={cn("font-semibold tabular-nums text-xs", fillCfg.color)}>
+                                                            {fill}%
+                                                        </span>
+                                                    </div>
+                                                </td>
+
+                                                {/* Fill rate */}
+                                                <td className="py-3 px-4 tabular-nums text-xs text-muted-foreground hidden md:table-cell">
+                                                    {pred.fill_rate_per_hour != null
+                                                        ? `${pred.fill_rate_per_hour.toFixed(2)}%/h`
+                                                        : "—"}
+                                                </td>
+
+                                                {/* Time to full */}
+                                                <td className={cn("py-3 px-4 tabular-nums text-xs", timeClass)}>
+                                                    {hours != null ? formatHours(hours) : "—"}
+                                                </td>
+
+                                                {/* Confidence */}
+                                                <td className="py-3 px-4 hidden lg:table-cell">
+                                                    <div className="flex items-center gap-2">
+                                                        <div className="w-12 h-1.5 rounded-full bg-gray-100">
+                                                            <div
+                                                                className={cn(
+                                                                    "h-1.5 rounded-full",
+                                                                    conf >= 70
+                                                                        ? "bg-emerald-500"
+                                                                        : conf >= 40
+                                                                            ? "bg-amber-500"
+                                                                            : "bg-gray-400"
+                                                                )}
+                                                                style={{ width: `${conf}%` }}
+                                                            />
+                                                        </div>
+                                                        <span className="text-xs tabular-nums text-muted-foreground">
+                                                            {conf.toFixed(0)}%
+                                                        </span>
+                                                    </div>
+                                                </td>
+
+                                                {/* Data points */}
+                                                <td className="py-3 px-4 text-xs tabular-nums text-muted-foreground hidden lg:table-cell">
+                                                    {pred.data_points_used ?? "—"}
+                                                </td>
+                                            </tr>
+                                        )
+                                    })}
+                                </tbody>
+                            </table>
                         </div>
                     ) : (
-                        <div className="p-8 text-center rounded-lg border-2 border-dashed border-green-200 bg-green-50">
-                            <Zap className="h-8 w-8 text-green-600 mx-auto mb-2" />
-                            <p className="text-green-900 font-semibold">All Clear!</p>
-                            <p className="text-sm text-green-800 mt-1">
-                                No bins are predicted to fill up in the next {timeframe} hours.
-                            </p>
+                        <div className="flex flex-col items-center justify-center gap-3 py-12 text-muted-foreground">
+                            <Brain className="h-10 w-10 opacity-25" />
+                            <div className="text-center">
+                                <p className="font-medium text-sm">No predictions available</p>
+                                <p className="text-xs mt-1 max-w-xs">
+                                    Send telemetry data to your bins to start generating fill predictions.
+                                </p>
+                            </div>
                         </div>
                     )}
-                </CardContent>
-            </Card>
-
-            {/* Fill Predictions List */}
-            <Card>
-                <CardHeader>
-                    <CardTitle className="flex items-center gap-2">
-                        <TrendingUp className="h-5 w-5" />
-                        All Fill Predictions
-                    </CardTitle>
-                    <CardDescription>
-                        Fill rate and time to capacity for all bins
-                    </CardDescription>
-                </CardHeader>
-                <CardContent>
-                    <div className="relative w-full overflow-auto">
-                        <table className="w-full text-sm">
-                            <thead>
-                                <tr className="border-b">
-                                    <th className="text-left font-medium py-3 px-2">Bin ID</th>
-                                    <th className="text-left font-medium py-3 px-2">Fill Level</th>
-                                    <th className="text-left font-medium py-3 px-2">Fill Rate</th>
-                                    <th className="text-left font-medium py-3 px-2">Time Till Full</th>
-                                    <th className="text-left font-medium py-3 px-2">Confidence</th>
-                                    <th className="text-left font-medium py-3 px-2">Data Points</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {predictions.length > 0 ? (
-                                    predictions.map((pred) => (
-                                        <tr key={pred.bin_id} className="border-b hover:bg-gray-50">
-                                            <td className="py-3 px-2 font-medium">{pred.bin_id}</td>
-                                            <td className="py-3 px-2">
-                                                <Badge
-                                                    variant={
-                                                        pred.current_fill! >= 80
-                                                            ? "destructive"
-                                                            : pred.current_fill! >= 50
-                                                                ? "secondary"
-                                                                : "outline"
-                                                    }
-                                                >
-                                                    {pred.current_fill}%
-                                                </Badge>
-                                            </td>
-                                            <td className="py-3 px-2">
-                                                {pred.fill_rate_per_hour?.toFixed(2)}%/h
-                                            </td>
-                                            <td className="py-3 px-2">
-                                                <span className={cn(
-                                                    pred.hours_until_full! <= 6
-                                                        ? "text-red-600 font-semibold"
-                                                        : pred.hours_until_full! <= 12
-                                                            ? "text-amber-600 font-semibold"
-                                                            : "text-gray-600"
-                                                )}>
-                                                    {pred.hours_until_full?.toFixed(1)}h
-                                                </span>
-                                            </td>
-                                            <td className="py-3 px-2">
-                                                {(pred.confidence! * 100).toFixed(0)}%
-                                            </td>
-                                            <td className="py-3 px-2 text-muted-foreground">
-                                                {pred.data_points_used}
-                                            </td>
-                                        </tr>
-                                    ))
-                                ) : (
-                                    <tr>
-                                        <td colSpan={6} className="py-8 text-center text-muted-foreground">
-                                            No predictions available. Send telemetry data first.
-                                        </td>
-                                    </tr>
-                                )}
-                            </tbody>
-                        </table>
-                    </div>
                 </CardContent>
             </Card>
         </div>

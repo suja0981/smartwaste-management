@@ -1,36 +1,20 @@
-"""
-routers/auth.py — Phase 2 + Phase 3 update.
-
-Phase 3 additions:
-  POST /auth/device-token    register an FCM device token (push notifications)
-  DELETE /auth/device-token  unregister on logout / token refresh
-
-All other endpoints unchanged from Phase 2.
-
-Fixes applied:
-  - get_device_or_user: added token revocation (blacklist) check on JWT path.
-    Previously a logged-out admin JWT still authenticated IoT telemetry.
-  - All datetime.utcnow() replaced with datetime.now(timezone.utc)
-    (utcnow() is deprecated in Python 3.12+).
-"""
-
 from datetime import datetime, timedelta, timezone
-from typing import Optional, List
+from typing import List, Optional
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials, APIKeyHeader
+from fastapi.security import APIKeyHeader, HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
+from api_key_services import generate_api_key, revoke_api_key, verify_api_key
 from config import get_settings
-from database import UserDB, APIKeyDB, TokenBlacklistDB, get_db
-from models import UserRegister, UserLogin, TokenResponse, UserResponse, TokenRefreshRequest
+from database import APIKeyDB, TokenBlacklistDB, UserDB, UserSettingsDB, get_db
+from firebase_service import is_firebase_available, verify_firebase_token
+from models import TokenRefreshRequest, TokenResponse, UserLogin, UserRegister, UserResponse
 from security import PasswordPolicy
-from firebase_service import verify_firebase_token, is_firebase_available
-from api_key_services import generate_api_key, verify_api_key, revoke_api_key
 
 settings = get_settings()
 SECRET_KEY = settings.secret_key
@@ -45,13 +29,13 @@ api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 router = APIRouter()
 
 
-# ─── Pydantic models ──────────────────────────────────────────────────────────
-
 class FirebaseLoginRequest(BaseModel):
     id_token: str
 
+
 class APIKeyCreateRequest(BaseModel):
     label: str
+
 
 class APIKeyResponse(BaseModel):
     key_id: int
@@ -60,23 +44,49 @@ class APIKeyResponse(BaseModel):
     created_at: datetime
     last_used_at: Optional[datetime] = None
 
+
 class DeviceTokenRequest(BaseModel):
-    """FCM device token registration — Phase 3."""
     token: str
-    platform: str = "android"   # android | ios | web
+    platform: str = "android"
 
 
-# ─── Internal helpers ─────────────────────────────────────────────────────────
+class NotificationSettingsModel(BaseModel):
+    criticalBins: bool = True
+    routeUpdates: bool = True
+    systemAlerts: bool = False
+    emailDigest: bool = False
+    pushEnabled: bool = False
+
+
+class DisplaySettingsModel(BaseModel):
+    compactMode: bool = False
+    autoRefresh: bool = True
+
+
+class UserSettingsResponse(BaseModel):
+    full_name: str
+    email: str
+    notifications: NotificationSettingsModel
+    display: DisplaySettingsModel
+
+
+class UserSettingsUpdateRequest(BaseModel):
+    full_name: Optional[str] = None
+    notifications: NotificationSettingsModel
+    display: DisplaySettingsModel
+
 
 def _now() -> datetime:
-    """Current UTC time. Uses timezone-aware datetime (utcnow() is deprecated)."""
     return datetime.now(timezone.utc)
+
 
 def _hash_password(password: str) -> str:
     return pwd_context.hash(password)
 
+
 def _verify_password(plain: str, hashed: str) -> bool:
     return pwd_context.verify(plain, hashed)
+
 
 def _create_jwt(email: str, role: str, token_type: str = "access") -> str:
     now = _now()
@@ -95,6 +105,7 @@ def _create_jwt(email: str, role: str, token_type: str = "access") -> str:
     }
     return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
 
+
 def _is_token_revoked(token_jti: str, db: Session) -> bool:
     return (
         db.query(TokenBlacklistDB)
@@ -102,14 +113,18 @@ def _is_token_revoked(token_jti: str, db: Session) -> bool:
         .first()
     ) is not None
 
+
 def _revoke_token(token_jti: str, email: str, expires_at: datetime, db: Session) -> None:
-    db.add(TokenBlacklistDB(
-        token_jti=token_jti,
-        email=email,
-        revoked_at=_now(),
-        expires_at=expires_at,
-    ))
+    db.add(
+        TokenBlacklistDB(
+            token_jti=token_jti,
+            email=email,
+            revoked_at=_now(),
+            expires_at=expires_at,
+        )
+    )
     db.commit()
+
 
 def _user_to_response(user: UserDB) -> UserResponse:
     return UserResponse(
@@ -119,6 +134,47 @@ def _user_to_response(user: UserDB) -> UserResponse:
         role=user.role,
         is_active=user.is_active,
     )
+
+
+def _get_or_create_settings(user_id: int, db: Session) -> UserSettingsDB:
+    settings_row = db.query(UserSettingsDB).filter(UserSettingsDB.user_id == user_id).first()
+    if settings_row:
+        return settings_row
+
+    settings_row = UserSettingsDB(
+        user_id=user_id,
+        critical_bins=True,
+        route_updates=True,
+        system_alerts=False,
+        email_digest=False,
+        push_enabled=False,
+        compact_mode=False,
+        auto_refresh=True,
+        updated_at=_now(),
+    )
+    db.add(settings_row)
+    db.commit()
+    db.refresh(settings_row)
+    return settings_row
+
+
+def _settings_to_response(user: UserDB, settings_row: UserSettingsDB) -> UserSettingsResponse:
+    return UserSettingsResponse(
+        full_name=user.full_name,
+        email=user.email,
+        notifications=NotificationSettingsModel(
+            criticalBins=settings_row.critical_bins,
+            routeUpdates=settings_row.route_updates,
+            systemAlerts=settings_row.system_alerts,
+            emailDigest=settings_row.email_digest,
+            pushEnabled=settings_row.push_enabled,
+        ),
+        display=DisplaySettingsModel(
+            compactMode=settings_row.compact_mode,
+            autoRefresh=settings_row.auto_refresh,
+        ),
+    )
+
 
 def _upsert_firebase_user(decoded_token: dict, db: Session) -> UserDB:
     firebase_uid = decoded_token["uid"]
@@ -148,10 +204,9 @@ def _upsert_firebase_user(decoded_token: dict, db: Session) -> UserDB:
 
     db.commit()
     db.refresh(user)
+    _get_or_create_settings(user.id, db)
     return user
 
-
-# ─── Shared dependencies ──────────────────────────────────────────────────────
 
 def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(http_bearer),
@@ -163,12 +218,13 @@ def get_current_user(
             detail="Authentication required",
             headers={"WWW-Authenticate": "Bearer"},
         )
+
     token = credentials.credentials
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        email: str = payload.get("sub")
-        token_type: str = payload.get("type", "access")
-        jti: str = payload.get("jti")
+        email = payload.get("sub")
+        token_type = payload.get("type", "access")
+        jti = payload.get("jti")
 
         if not email:
             raise ValueError("No subject in token")
@@ -204,15 +260,6 @@ def get_device_or_user(
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(http_bearer),
     db: Session = Depends(get_db),
 ) -> dict:
-    """
-    Dual-auth dependency for the telemetry endpoint.
-
-    - IoT devices supply  X-API-Key: wsk_live_<key>
-    - Admins/testers supply  Authorization: Bearer <access_jwt>
-
-    FIX: The JWT path now checks the token blacklist so a logged-out
-    admin token can no longer authenticate telemetry ingestion.
-    """
     if api_key:
         record = verify_api_key(api_key, db)
         if record:
@@ -239,17 +286,15 @@ def get_device_or_user(
 
     raise HTTPException(
         status_code=401,
-        detail="Provide either X-API-Key header (IoT devices) or Authorization: Bearer <token>",
+        detail="Provide either X-API-Key header or Authorization: Bearer <token>",
     )
 
 
-# ─── POST /auth/signup ────────────────────────────────────────────────────────
-
 @router.post("/signup", response_model=TokenResponse)
 def signup(user_data: UserRegister, db: Session = Depends(get_db)):
-    is_valid, msg = PasswordPolicy.validate_password(user_data.password)
+    is_valid, message = PasswordPolicy.validate_password(user_data.password)
     if not is_valid:
-        raise HTTPException(status_code=422, detail=msg)
+        raise HTTPException(status_code=422, detail=message)
     if db.query(UserDB).filter(UserDB.email == user_data.email).first():
         raise HTTPException(status_code=400, detail="Email already registered")
 
@@ -265,6 +310,7 @@ def signup(user_data: UserRegister, db: Session = Depends(get_db)):
     db.add(user)
     db.commit()
     db.refresh(user)
+    _get_or_create_settings(user.id, db)
 
     return TokenResponse(
         access_token=_create_jwt(user.email, user.role, "access"),
@@ -273,8 +319,6 @@ def signup(user_data: UserRegister, db: Session = Depends(get_db)):
         expires_in=ACCESS_TOKEN_EXPIRE_MINUTES * 60,
     )
 
-
-# ─── POST /auth/login ─────────────────────────────────────────────────────────
 
 @router.post("/login", response_model=TokenResponse)
 def login(user_data: UserLogin, db: Session = Depends(get_db)):
@@ -286,6 +330,7 @@ def login(user_data: UserLogin, db: Session = Depends(get_db)):
     if not user.is_active:
         raise HTTPException(status_code=403, detail="Account disabled")
 
+    _get_or_create_settings(user.id, db)
     return TokenResponse(
         access_token=_create_jwt(user.email, user.role, "access"),
         refresh_token=_create_jwt(user.email, user.role, "refresh"),
@@ -294,12 +339,10 @@ def login(user_data: UserLogin, db: Session = Depends(get_db)):
     )
 
 
-# ─── POST /auth/firebase ──────────────────────────────────────────────────────
-
 @router.post("/firebase", response_model=TokenResponse)
 def firebase_login(body: FirebaseLoginRequest, db: Session = Depends(get_db)):
     if not is_firebase_available():
-        raise HTTPException(status_code=503, detail="Firebase auth not configured on this server.")
+        raise HTTPException(status_code=503, detail="Firebase auth is not configured on this server.")
 
     decoded = verify_firebase_token(body.id_token)
     if not decoded:
@@ -314,14 +357,45 @@ def firebase_login(body: FirebaseLoginRequest, db: Session = Depends(get_db)):
     )
 
 
-# ─── GET /auth/me ─────────────────────────────────────────────────────────────
-
 @router.get("/me", response_model=UserResponse)
 def get_me(current_user: UserDB = Depends(get_current_user)):
     return _user_to_response(current_user)
 
 
-# ─── POST /auth/logout ────────────────────────────────────────────────────────
+@router.get("/settings", response_model=UserSettingsResponse)
+def get_settings_for_user(
+    current_user: UserDB = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    settings_row = _get_or_create_settings(current_user.id, db)
+    return _settings_to_response(current_user, settings_row)
+
+
+@router.put("/settings", response_model=UserSettingsResponse)
+def update_settings_for_user(
+    body: UserSettingsUpdateRequest,
+    current_user: UserDB = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    settings_row = _get_or_create_settings(current_user.id, db)
+
+    if body.full_name is not None and body.full_name.strip():
+        current_user.full_name = body.full_name.strip()
+
+    settings_row.critical_bins = body.notifications.criticalBins
+    settings_row.route_updates = body.notifications.routeUpdates
+    settings_row.system_alerts = body.notifications.systemAlerts
+    settings_row.email_digest = body.notifications.emailDigest
+    settings_row.push_enabled = body.notifications.pushEnabled
+    settings_row.compact_mode = body.display.compactMode
+    settings_row.auto_refresh = body.display.autoRefresh
+    settings_row.updated_at = _now()
+
+    db.commit()
+    db.refresh(current_user)
+    db.refresh(settings_row)
+    return _settings_to_response(current_user, settings_row)
+
 
 @router.post("/logout")
 def logout(
@@ -342,16 +416,14 @@ def logout(
     return {"message": "Logged out successfully"}
 
 
-# ─── POST /auth/refresh ──────────────────────────────────────────────────────
-
 @router.post("/refresh", response_model=TokenResponse)
 def refresh_token(body: TokenRefreshRequest, db: Session = Depends(get_db)):
     try:
         payload = jwt.decode(body.refresh_token, SECRET_KEY, algorithms=[ALGORITHM])
-        email: str = payload.get("sub")
-        role: str = payload.get("role")
-        token_type: str = payload.get("type")
-        jti: str = payload.get("jti")
+        email = payload.get("sub")
+        role = payload.get("role")
+        token_type = payload.get("type")
+        jti = payload.get("jti")
 
         if token_type != "refresh":
             raise ValueError("Not a refresh token")
@@ -366,6 +438,7 @@ def refresh_token(body: TokenRefreshRequest, db: Session = Depends(get_db)):
     if not user or not user.is_active:
         raise HTTPException(status_code=401, detail="User not found or disabled")
 
+    _get_or_create_settings(user.id, db)
     return TokenResponse(
         access_token=_create_jwt(email, role, "access"),
         refresh_token=body.refresh_token,
@@ -374,21 +447,14 @@ def refresh_token(body: TokenRefreshRequest, db: Session = Depends(get_db)):
     )
 
 
-# ─── POST /auth/device-token  (Phase 3 — FCM) ────────────────────────────────
-
 @router.post("/device-token", status_code=201)
 def register_device_token(
     body: DeviceTokenRequest,
     current_user: UserDB = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """
-    Register an FCM device token for push notifications.
-    Call this immediately after login with the token from the Firebase SDK.
-
-    Body: { "token": "<fcm_registration_token>", "platform": "android" }
-    """
     from services.notifications import register_device_token as _register
+
     _register(current_user.id, body.token, body.platform, db)
     return {"registered": True, "platform": body.platform}
 
@@ -399,13 +465,11 @@ def unregister_device_token(
     current_user: UserDB = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Unregister an FCM device token. Call on logout or app uninstall."""
     from services.notifications import unregister_device_token as _unregister
+
     removed = _unregister(body.token, db)
     return {"unregistered": removed}
 
-
-# ─── IoT API Key management ───────────────────────────────────────────────────
 
 @router.post("/api-keys")
 def create_api_key(
@@ -413,7 +477,6 @@ def create_api_key(
     db: Session = Depends(get_db),
     _admin: UserDB = Depends(require_admin),
 ):
-    """Generate a new API key for an IoT device. Admin only."""
     return generate_api_key(body.label, db)
 
 
@@ -425,13 +488,13 @@ def list_api_keys(
     keys = db.query(APIKeyDB).order_by(APIKeyDB.created_at.desc()).all()
     return [
         APIKeyResponse(
-            key_id=k.id,
-            label=k.label,
-            is_active=k.is_active,
-            created_at=k.created_at,
-            last_used_at=k.last_used_at,
+            key_id=key.id,
+            label=key.label,
+            is_active=key.is_active,
+            created_at=key.created_at,
+            last_used_at=key.last_used_at,
         )
-        for k in keys
+        for key in keys
     ]
 
 

@@ -30,6 +30,7 @@ def _crew_to_model(c: CrewDB) -> Crew:
         current_location=c.current_location,
         current_latitude=c.current_latitude,
         current_longitude=c.current_longitude,
+        zone_id=c.zone_id,
         created_at=c.created_at,
     )
 
@@ -38,15 +39,20 @@ def _crew_to_model(c: CrewDB) -> Crew:
 def list_crews(
     zone_id: Optional[str] = Query(default=None, description="Filter by zone (Phase 6)"),
     status: Optional[str] = Query(default=None, description="Filter by status"),
+    limit: int = Query(default=100, ge=1, le=500, description="Max records to return"),
+    offset: int = Query(default=0, ge=0, description="Number of records to skip"),
     db: Session = Depends(get_db),
 ):
     """Get all crews, optionally filtered by zone or status."""
     query = db.query(CrewDB)
     if zone_id:
-        query = query.filter(CrewDB.zone_id == zone_id)
+        if zone_id == "unassigned":
+            query = query.filter(CrewDB.zone_id.is_(None))
+        else:
+            query = query.filter(CrewDB.zone_id == zone_id)
     if status:
         query = query.filter(CrewDB.status == status)
-    return [_crew_to_model(c) for c in query.all()]
+    return [_crew_to_model(c) for c in query.order_by(CrewDB.name).offset(offset).limit(limit).all()]
 
 
 @router.post("/", response_model=Crew, status_code=201)
@@ -130,7 +136,7 @@ def assign_zone(
 
 
 @router.delete("/{crew_id}", status_code=204)
-def delete_crew(crew_id: str, db: Session = Depends(get_db)):
+def delete_crew(crew_id: str, db: Session = Depends(get_db), _admin=Depends(require_admin)):
     crew_db = db.query(CrewDB).filter(CrewDB.id == crew_id).first()
     if not crew_db:
         raise HTTPException(status_code=404, detail="Crew not found")

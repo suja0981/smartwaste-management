@@ -5,10 +5,13 @@ import { GeistMono } from "geist/font/mono"
 import { Analytics } from "@vercel/analytics/next"
 import { ThemeProvider } from "@/components/theme-provider"
 import { AuthProvider } from "@/contexts/auth-context"
+import { QueryProvider } from "@/components/query-provider"
 import { Toaster } from "@/components/ui/toaster"
 import { Suspense } from "react"
 import "./globals.css"
-import "leaflet/dist/leaflet.css"
+// Leaflet CSS moved to app/map/page.tsx — only loaded on the map page
+
+
 
 export const metadata: Metadata = {
   title: "Smart Waste Management Dashboard",
@@ -24,12 +27,14 @@ export default function RootLayout({
     <html lang="en" suppressHydrationWarning>
       <body className={`${GeistSans.variable} ${GeistMono.variable} font-sans`}>
         <AuthProvider>
+        <QueryProvider>
           <ThemeProvider>
-            <Suspense fallback={null}>
-              {children}
-              <Toaster />
-            </Suspense>
-          </ThemeProvider>
+              <Suspense fallback={<div className="flex h-screen items-center justify-center"><div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" /></div>}>
+                {children}
+                <Toaster />
+              </Suspense>
+            </ThemeProvider>
+        </QueryProvider>
         </AuthProvider>
 
         <Analytics />

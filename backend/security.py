@@ -35,7 +35,15 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["X-XSS-Protection"] = "1; mode=block"
         response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
-        response.headers["Content-Security-Policy"] = "default-src 'self'"
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'self'; "
+            "script-src 'self' 'unsafe-inline' https://www.gstatic.com; "
+            "style-src 'self' 'unsafe-inline' https://unpkg.com; "
+            "img-src 'self' data: https://*.tile.openstreetmap.org https://*.basemaps.cartocdn.com blob:; "
+            "connect-src 'self' https://www.google-analytics.com https://*.vercel-insights.com wss:; "
+            "font-src 'self' data:; "
+            "frame-ancestors 'none'"
+        )
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
         response.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
         response.headers["Server"] = "SmartWaste/1.0"
@@ -203,6 +211,7 @@ class InputValidationMiddleware(BaseHTTPMiddleware):
 def add_security_to_app(
     app: FastAPI,
     enable_rate_limiting: bool = True,
+    enable_auth_rate_limiting: bool = True,
     requests_per_minute: int = 60,
 ):
     """
@@ -211,11 +220,13 @@ def add_security_to_app(
     Args:
         app: FastAPI application instance
         enable_rate_limiting: Whether to enable general rate limiting
+        enable_auth_rate_limiting: Whether to enable /auth/* throttling
         requests_per_minute: General API rate limit (per IP, per worker)
     """
     app.add_middleware(SecurityHeadersMiddleware)
     app.add_middleware(InputValidationMiddleware)
-    app.add_middleware(AuthRateLimitMiddleware, requests_per_minute=5)
+    if enable_auth_rate_limiting:
+        app.add_middleware(AuthRateLimitMiddleware, requests_per_minute=5)
     if enable_rate_limiting:
         app.add_middleware(RateLimitMiddleware, requests_per_minute=requests_per_minute)
 

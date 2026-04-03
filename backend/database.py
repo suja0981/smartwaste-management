@@ -4,7 +4,7 @@ database.py
 Changes from original:
 - Removed the empty # AI Alerts placeholder (no CCTV in this project)
 - Added DeviceTokenDB for Phase 3 Firebase Cloud Messaging push notifications
-- Pool settings for PostgreSQL kept; SQLite fallback kept for local dev
+- PostgreSQL only; SQLite removed
 """
 
 from sqlalchemy import (
@@ -14,19 +14,21 @@ from sqlalchemy import (
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
 import os
+from dotenv import load_dotenv
+
+load_dotenv()  # load .env before reading DATABASE_URL
 
 # ─── Database URL ─────────────────────────────────────────────────────────────
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./smart_waste.db")
+DATABASE_URL = os.getenv("DATABASE_URL")
+if not DATABASE_URL:
+    raise RuntimeError("DATABASE_URL environment variable is not set. A PostgreSQL URL is required.")
 
-if DATABASE_URL.startswith("sqlite"):
-    engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
-else:
-    engine = create_engine(
-        DATABASE_URL,
-        pool_size=10,
-        max_overflow=20,
-        pool_pre_ping=True,
-    )
+engine = create_engine(
+    DATABASE_URL,
+    pool_size=10,
+    max_overflow=20,
+    pool_pre_ping=True,
+)
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
@@ -47,6 +49,7 @@ class UserDB(Base):
     auth_provider = Column(String, default="local")
 
     device_tokens = relationship("DeviceTokenDB", back_populates="user", cascade="all, delete-orphan")
+    settings = relationship("UserSettingsDB", back_populates="user", uselist=False, cascade="all, delete-orphan")
 
 
 # ─── JWT Blacklist ────────────────────────────────────────────────────────────
@@ -76,6 +79,22 @@ class DeviceTokenDB(Base):
     updated_at = Column(DateTime, nullable=True)
 
     user = relationship("UserDB", back_populates="device_tokens")
+
+
+class UserSettingsDB(Base):
+    __tablename__ = "user_settings"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id"), unique=True, index=True, nullable=False)
+    critical_bins = Column(Boolean, default=True)
+    route_updates = Column(Boolean, default=True)
+    system_alerts = Column(Boolean, default=False)
+    email_digest = Column(Boolean, default=False)
+    push_enabled = Column(Boolean, default=False)
+    compact_mode = Column(Boolean, default=False)
+    auto_refresh = Column(Boolean, default=True)
+    updated_at = Column(DateTime, nullable=True)
+
+    user = relationship("UserDB", back_populates="settings")
 
 
 # ─── Bins ─────────────────────────────────────────────────────────────────────
@@ -142,10 +161,10 @@ class TaskDB(Base):
     description = Column(Text, nullable=True)
     priority = Column(String)
     status = Column(String)
-    bin_id = Column(String, nullable=True)
+    bin_id = Column(String, ForeignKey("bins.id", ondelete="SET NULL"), nullable=True)
     location = Column(String)
     estimated_time_minutes = Column(Integer, nullable=True)
-    crew_id = Column(String, ForeignKey("crews.id"), nullable=True)
+    crew_id = Column(String, ForeignKey("crews.id", ondelete="CASCADE"), nullable=True)
     alert_id = Column(Integer, nullable=True)   # kept for schema compat, unused
     created_at = Column(DateTime)
     due_date = Column(DateTime, nullable=True)
@@ -159,7 +178,7 @@ class TaskDB(Base):
 class RouteDB(Base):
     __tablename__ = "routes"
     id = Column(String, primary_key=True, index=True)
-    crew_id = Column(String, ForeignKey("crews.id"), nullable=True)
+    crew_id = Column(String, ForeignKey("crews.id", ondelete="CASCADE"), nullable=True)
     status = Column(String, default="planned")
     algorithm_used = Column(String)
     total_distance_km = Column(Float)

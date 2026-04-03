@@ -1,46 +1,27 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useQuery } from "@tanstack/react-query"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { useToast } from "@/hooks/use-toast"
-import {
-  getPredictedAlerts,
-  getAllPredictions,
-  getMLStats,
-  type PredictedAlert,
-  type FillPrediction,
-  type MLStats
-} from "@/lib/api-client"
+import { getPredictedAlerts, getAllPredictions, getMLStats } from "@/lib/api-client"
 import { Clock, TrendingUp, Brain, AlertTriangle, Zap, Activity, Loader2 } from "lucide-react"
 import { cn } from "@/lib/utils"
 
 export function MLPredictionsCard() {
-  const [predictions, setPredictions] = useState<FillPrediction[]>([])
-  const [loading, setLoading] = useState(true)
-  const { toast } = useToast()
+  const { data: predictions = [], isLoading } = useQuery({
+    queryKey: ["predictions"],
+    queryFn: async () => {
+      const result = await getAllPredictions()
+      return result.predictions.slice(0, 4)
+    },
+    refetchInterval: 30_000,
+    staleTime: 15_000,
+  })
 
-  const fetchPredictions = async () => {
-    try {
-      const data = await getAllPredictions()
-      setPredictions(data.predictions.slice(0, 5))
-      setLoading(false)
-    } catch (error) {
-      console.error('Prediction fetch error:', error)
-      setLoading(false)
-    }
-  }
-
-  useEffect(() => {
-    fetchPredictions()
-    const interval = setInterval(fetchPredictions, 30000) // Refresh every 30s
-    return () => clearInterval(interval)
-  }, [])
-
-  if (loading) {
+  if (isLoading) {
     return (
-      <Card className="border-0 shadow-xl bg-white/50 dark:bg-slate-900/50 backdrop-blur-xl">
+      <Card className="shadow-sm">
         <CardContent className="p-6 flex items-center justify-center min-h-[200px]">
           <Loader2 className="h-8 w-8 animate-spin text-primary" />
         </CardContent>
@@ -49,19 +30,21 @@ export function MLPredictionsCard() {
   }
 
   return (
-    <Card className="border-0 shadow-xl bg-white/50 dark:bg-slate-900/50 backdrop-blur-xl overflow-hidden">
-      <CardHeader className="border-b bg-gradient-to-r from-violet-50/50 to-transparent dark:from-violet-900/20 pb-4">
-        <div className="flex items-center justify-between">
+    <Card className="overflow-hidden shadow-sm">
+      <CardHeader className="border-b bg-muted/20 pb-4">
+        <div className="flex items-center justify-between gap-3">
           <div>
-            <CardTitle className="text-2xl font-bold flex items-center gap-2">
-              <Brain className="h-5 w-5 text-violet-600" />
+            <CardTitle className="text-base font-semibold flex items-center gap-2">
+              <Brain className="h-4 w-4 text-violet-600" />
               ML Fill Predictions
             </CardTitle>
-            <CardDescription className="mt-1">AI-powered capacity forecasting</CardDescription>
+            <CardDescription className="mt-1 text-xs">
+              Upcoming bins most likely to reach capacity soon
+            </CardDescription>
           </div>
-          <Badge className="bg-violet-500/10 text-violet-600 border-violet-500/20">
+          <Badge className="border-violet-200 bg-violet-50 text-violet-700">
             <Zap className="h-3 w-3 mr-1" />
-            Smart AI
+            Forecast
           </Badge>
         </div>
       </CardHeader>
@@ -75,53 +58,77 @@ export function MLPredictionsCard() {
             </div>
           ) : (
             predictions.map((pred) => (
-              <div 
+              <div
                 key={pred.bin_id}
-                className="group relative overflow-hidden rounded-xl border bg-gradient-to-br from-white to-slate-50 dark:from-slate-800 dark:to-slate-900 p-4 transition-all duration-300 hover:shadow-lg"
+                className="rounded-xl border bg-card p-4 transition-colors hover:bg-muted/30"
               >
-                <div className="flex items-center justify-between mb-2">
+                <div className="mb-3 flex items-start justify-between gap-3">
                   <div>
                     <h4 className="font-semibold text-sm">{pred.bin_id}</h4>
                     <p className="text-xs text-muted-foreground">
-                      Current: {pred.current_fill}%
+                      Current fill: {pred.current_fill}%
                     </p>
                   </div>
-                  {pred.confidence && (
-                    <Badge variant="outline" className="text-xs">
+                  {pred.confidence != null && (
+                    <Badge variant="outline" className="shrink-0 text-xs">
                       {Math.round(pred.confidence * 100)}% confidence
                     </Badge>
                   )}
                 </div>
 
-                {pred.hours_until_full ? (
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-2 text-sm">
-                      <Clock className="h-4 w-4 text-violet-600" />
-                      <span className="font-medium text-violet-600">
-                        Full in {pred.hours_until_full.toFixed(1)} hours
-                      </span>
+                {pred.hours_until_full != null ? (
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="rounded-lg bg-violet-50 p-3 dark:bg-violet-950/20">
+                      <div className="flex items-center gap-2 text-sm">
+                        <Clock className="h-4 w-4 text-violet-600" />
+                        <span className="font-medium text-violet-700 dark:text-violet-300">
+                          Full in {pred.hours_until_full.toFixed(1)} hours
+                        </span>
+                      </div>
+                      {pred.predicted_full_time && (
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          Expected {new Date(pred.predicted_full_time).toLocaleString()}
+                        </p>
+                      )}
                     </div>
-                    {pred.fill_rate_per_hour && (
-                      <p className="text-xs text-muted-foreground">
-                        Filling at {pred.fill_rate_per_hour.toFixed(2)}% per hour
+                    <div className="rounded-lg bg-muted/40 p-3">
+                      <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                        Fill rate
                       </p>
-                    )}
-                    {pred.predicted_full_time && (
-                      <p className="text-xs text-muted-foreground">
-                        Expected: {new Date(pred.predicted_full_time).toLocaleString()}
-                      </p>
-                    )}
+                      {pred.fill_rate_per_hour != null ? (
+                        <>
+                          <p className="mt-1 text-lg font-semibold">
+                            {pred.fill_rate_per_hour.toFixed(2)}%/h
+                          </p>
+                          <p className="text-xs text-muted-foreground">
+                            Based on the latest telemetry trend
+                          </p>
+                        </>
+                      ) : (
+                        <p className="mt-2 text-sm text-muted-foreground">
+                          Fill rate is still being calculated.
+                        </p>
+                      )}
+                    </div>
                   </div>
                 ) : (
-                  <p className="text-sm text-muted-foreground">Analyzing fill patterns...</p>
+                  <div className="rounded-lg bg-muted/40 p-3">
+                    <div className="flex items-center gap-2 text-sm">
+                      <Clock className="h-4 w-4 text-violet-600" />
+                      <span className="font-medium">Analyzing fill pattern</span>
+                    </div>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      More telemetry is needed before a reliable ETA can be shown.
+                    </p>
+                  </div>
                 )}
               </div>
             ))
           )}
         </div>
         <div className="mt-6 flex justify-center">
-          <Button asChild variant="outline" className="w-full rounded-xl border-2">
-            <a href="/predictions">View All Predictions →</a>
+          <Button asChild variant="outline" className="w-full rounded-xl">
+            <a href="/predictions">View all predictions</a>
           </Button>
         </div>
       </CardContent>
@@ -130,26 +137,15 @@ export function MLPredictionsCard() {
 }
 
 export function PredictedAlertsCard() {
-  const [alerts, setAlerts] = useState<PredictedAlert[]>([])
-  const [loading, setLoading] = useState(true)
-  const { toast } = useToast()
-
-  const fetchAlerts = async () => {
-    try {
-      const data = await getPredictedAlerts(24)
-      setAlerts(data.alerts.slice(0, 5))
-      setLoading(false)
-    } catch (error) {
-      console.error('Predicted alerts fetch error:', error)
-      setLoading(false)
-    }
-  }
-
-  useEffect(() => {
-    fetchAlerts()
-    const interval = setInterval(fetchAlerts, 30000)
-    return () => clearInterval(interval)
-  }, [])
+  const { data: alerts = [], isLoading } = useQuery({
+    queryKey: ["predicted-alerts"],
+    queryFn: async () => {
+      const result = await getPredictedAlerts(24)
+      return result.alerts.slice(0, 5)
+    },
+    refetchInterval: 30_000,
+    staleTime: 15_000,
+  })
 
   const getUrgencyColor = (urgency: string) => {
     switch (urgency) {
@@ -162,7 +158,7 @@ export function PredictedAlertsCard() {
     }
   }
 
-  if (loading) {
+  if (isLoading) {
     return (
       <Card className="border-0 shadow-xl bg-white/50 dark:bg-slate-900/50 backdrop-blur-xl">
         <CardContent className="p-6 flex items-center justify-center min-h-[200px]">
@@ -236,27 +232,14 @@ export function PredictedAlertsCard() {
 }
 
 export function MLStatsCard() {
-  const [stats, setStats] = useState<MLStats | null>(null)
-  const [loading, setLoading] = useState(true)
+  const { data: stats, isLoading } = useQuery({
+    queryKey: ["ml-stats"],
+    queryFn: getMLStats,
+    refetchInterval: 60_000,
+    staleTime: 30_000,
+  })
 
-  const fetchStats = async () => {
-    try {
-      const data = await getMLStats()
-      setStats(data)
-      setLoading(false)
-    } catch (error) {
-      console.error('ML stats fetch error:', error)
-      setLoading(false)
-    }
-  }
-
-  useEffect(() => {
-    fetchStats()
-    const interval = setInterval(fetchStats, 60000) // Refresh every minute
-    return () => clearInterval(interval)
-  }, [])
-
-  if (loading || !stats) {
+  if (isLoading || !stats) {
     return (
       <Card className="border-0 shadow-xl bg-gradient-to-br from-emerald-500 to-teal-600 text-white">
         <CardContent className="p-6 flex items-center justify-center min-h-[150px]">
@@ -281,25 +264,25 @@ export function MLStatsCard() {
           <div>
             <p className="text-sm font-medium text-emerald-50/80">ML Service Status</p>
             <div className="flex items-baseline gap-2">
-              <h3 className="text-3xl font-bold">{stats.status}</h3>
+              <h3 className="text-3xl font-bold">{stats?.status || "unknown"}</h3>
             </div>
           </div>
           <div className="grid grid-cols-2 gap-3 text-sm">
             <div>
               <p className="text-emerald-50/60">Bins Tracked</p>
-              <p className="text-lg font-bold">{stats.statistics.total_bins_tracked}</p>
+              <p className="text-lg font-bold">{stats?.statistics?.total_bins_tracked ?? 0}</p>
             </div>
             <div>
               <p className="text-emerald-50/60">Data Points</p>
-              <p className="text-lg font-bold">{stats.statistics.total_data_points}</p>
+              <p className="text-lg font-bold">{stats?.statistics?.total_data_points ?? 0}</p>
             </div>
             <div>
               <p className="text-emerald-50/60">With Predictions</p>
-              <p className="text-lg font-bold">{stats.statistics.bins_with_predictions}</p>
+              <p className="text-lg font-bold">{stats?.statistics?.bins_with_predictions ?? 0}</p>
             </div>
             <div>
               <p className="text-emerald-50/60">Coverage</p>
-              <p className="text-lg font-bold">{stats.statistics.prediction_coverage.toFixed(1)}%</p>
+              <p className="text-lg font-bold">{(stats?.statistics?.prediction_coverage ?? 0).toFixed(1)}%</p>
             </div>
           </div>
         </div>

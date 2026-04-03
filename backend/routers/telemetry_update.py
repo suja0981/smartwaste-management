@@ -4,6 +4,8 @@ routers/telemetry_update.py  —  Phase 2 + Phase 3 update.
 Phase 2: IoT devices authenticate with X-API-Key; dashboard/testing with JWT.
 Phase 3: After persisting telemetry, broadcast to WebSocket clients and
          fire FCM notifications when a bin crosses the warning threshold.
+Phase 7: Refresh predictions immediately and auto-create pending
+         collection tasks for bins predicted to fill soon.
 
 Important: The WebSocket broadcast is fire-and-forget (asyncio.create_task).
   This keeps the HTTP response fast even if there are many WS clients.
@@ -34,18 +36,7 @@ async def ingest_telemetry(
     db: Session = Depends(get_db),
     _auth: dict = Depends(get_device_or_user),
 ):
-    """
-    Ingest a telemetry reading from an IoT sensor.
-
-    Auth options:
-      - IoT devices: add header  X-API-Key: wsk_live_<your-key>
-      - Swagger / testing: use Authorization: Bearer <admin-jwt>
-
-    Side-effects (non-blocking):
-      - WebSocket broadcast to all connected dashboard clients
-      - FCM push notification if fill crosses 80% or 90%
-      - ML model data ingestion
-    """
+   
     bin_db = db.query(BinDB).filter(BinDB.id == payload.bin_id).first()
     if not bin_db:
         raise HTTPException(status_code=404, detail="Bin not registered")
@@ -97,23 +88,25 @@ async def ingest_telemetry(
     except Exception as e:
         logger.warning(f"[WS] Broadcast failed for {payload.bin_id}: {e}")
 
-    # ── Phase 3: FCM push notification on threshold crossing ───────────────
+    # ── Phase 3: FCM push notification on threshold crossing (non-blocking) ─
     # Only notify on the crossing event (old < threshold, new >= threshold)
     # to avoid spamming every 30-second reading while bin is already full.
     new_fill = payload.fill_level_percent
-    _trigger_push_notification(old_fill, new_fill, bin_db, db)
+    asyncio.create_task(
+        _trigger_push_notification_async(old_fill, new_fill, bin_db, db)
+    )
 
-    # ── Feed ML models ─────────────────────────────────────────────────────
-    try:
-        from routers.predictions import ml_service
-        ml_service.ingest_telemetry(payload.bin_id, {
+    # ── Feed prediction models (non-blocking) ──────────────────────────────
+    _ingest_prediction_and_sync_tasks(
+        payload.bin_id,
+        {
             "fill_level_percent": payload.fill_level_percent,
             "battery_percent": payload.battery_percent,
             "temperature_c": payload.temperature_c,
             "humidity_percent": payload.humidity_percent,
-        })
-    except Exception as e:
-        logger.warning(f"[ML] Ingestion failed for {payload.bin_id}: {e}")
+        },
+        db,
+    )
 
     return {
         "accepted": True,
@@ -123,6 +116,44 @@ async def ingest_telemetry(
         "timestamp": ts_str,
         "received_from": _auth.get("label", "unknown"),
     }
+
+
+async def _trigger_push_notification_async(
+    old_fill: int, new_fill: int, bin_db: BinDB, db: Session
+) -> None:
+    """
+    Fire an FCM notification only when the bin crosses a threshold for the
+    first time (not on every reading while it's already above the threshold).
+    Runs as a background task to avoid blocking the HTTP response.
+    """
+    try:
+        from services.notifications import notify_bin_fill_warning
+
+        crossed_critical = old_fill < _CRIT_THRESHOLD <= new_fill
+        crossed_warning = old_fill < _WARN_THRESHOLD <= new_fill and new_fill < _CRIT_THRESHOLD
+
+        if crossed_critical or crossed_warning:
+            notify_bin_fill_warning(
+                bin_id=bin_db.id,
+                location=bin_db.location,
+                fill_level=new_fill,
+                db=db,
+            )
+    except Exception as e:
+        logger.warning(f"[FCM] Notification failed for {bin_db.id}: {e}")
+
+
+def _ingest_prediction_and_sync_tasks(bin_id: str, telemetry_data: dict, db: Session) -> None:
+    """
+    Feed telemetry to prediction models.
+    Runs as a background task to avoid blocking the HTTP response.
+    """
+    try:
+        from routers.predictions import prediction_service, sync_prediction_tasks
+        prediction_service.ingest_telemetry(bin_id, telemetry_data)
+        sync_prediction_tasks(db, hours_ahead=24, target_bin_ids=[bin_id])
+    except Exception as e:
+        logger.warning(f"[prediction] Ingestion/task sync failed for {bin_id}: {e}")
 
 
 def _trigger_push_notification(

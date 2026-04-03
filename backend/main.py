@@ -24,6 +24,9 @@ from security import add_security_to_app
 logger = logging.getLogger(__name__)
 settings = get_settings()
 
+# ── Production safety check ───────────────────────────────────────────────────
+settings.validate_production_secrets()
+
 # ── Create all DB tables (idempotent) ─────────────────────────────────────────
 Base.metadata.create_all(bind=engine)
 
@@ -44,13 +47,15 @@ async def lifespan(app: FastAPI):
     """
     db = SessionLocal()
     try:
-        # ── ML warm-up ────────────────────────────────────────────────────────
+        # ── Prediction service warm-up ────────────────────────────────────
+        # Rebuild in-memory prediction models from persisted telemetry so
+        # predictions work immediately after restart.
         try:
-            from routers.predictions import ml_service
-            n = ml_service.rebuild_from_db(db)
-            logger.info(f"[startup] ML models warmed up with {n} telemetry readings")
+            from routers.predictions import prediction_service
+            n = prediction_service.rebuild_from_db(db)
+            logger.info(f"[startup] Prediction service warmed up with {n} telemetry readings")
         except Exception as e:
-            logger.warning(f"[startup] ML warm-up failed (non-fatal): {e}")
+            logger.warning(f"[startup] Prediction service warm-up failed (non-fatal): {e}")
 
         # ── Token blacklist pruning ────────────────────────────────────────────
         try:
@@ -91,7 +96,8 @@ app = FastAPI(
 # ── Security middleware ───────────────────────────────────────────────────────
 add_security_to_app(
     app,
-    enable_rate_limiting=True,
+    enable_rate_limiting=not (settings.environment.lower() == "test"),
+    enable_auth_rate_limiting=not (settings.environment.lower() == "test"),
     requests_per_minute=200,
 )
 
@@ -101,7 +107,7 @@ app.add_middleware(
     allow_origins=settings.cors_origins_list,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH"],
-    allow_headers=["*"],
+    allow_headers=["Authorization", "Content-Type", "X-API-Key"],
 )
 
 # ── Routers ───────────────────────────────────────────────────────────────────

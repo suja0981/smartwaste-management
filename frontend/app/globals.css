@@ -152,3 +152,40 @@
     @apply ring-2 ring-primary ring-offset-2 ring-offset-background outline-none;
   }
 }
+
+/* ─── Leaflet CSS fixes ───────────────────────────────────────────────────── */
+/* These rules ensure Leaflet maps display properly despite Tailwind resets */
+.leaflet-container {
+  font: 12px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif !important;
+  box-sizing: border-box;
+  outline: none;
+}
+
+.leaflet-container * {
+  box-sizing: border-box;
+}
+
+.leaflet-pane {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  box-sizing: border-box;
+}
+
+.leaflet-pane > svg,
+.leaflet-pane > canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+}
+
+.leaflet-zoom-hide {
+  display: none !important;
+}
+
+/* Ensure map tiles and markers display correctly */
+.leaflet-object {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-user-drag: none;
+}

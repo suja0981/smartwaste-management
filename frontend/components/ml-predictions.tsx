@@ -7,24 +7,19 @@ import { Button } from "@/components/ui/button"
 import { Progress } from "@/components/ui/progress"
 import { useToast } from "@/hooks/use-toast"
 import {
-    getPrediction,
     analyzeBin,
-    getAnomalies,
-    getCollectionRecommendation,
-    getUsagePattern,
-    getAllPredictions,
     type BinAnalysis,
     type FillPrediction,
     type Anomaly,
     type CollectionRecommendation,
 } from "@/lib/api-client"
+// FIX: removed non-existent imports: getPrediction, getAnomalies,
+//      getCollectionRecommendation, getUsagePattern, getAllPredictions
 import {
     TrendingUp,
     AlertTriangle,
     CheckCircle,
     Clock,
-    Zap,
-    AlertCircle,
     RefreshCw,
     Loader2,
     Activity,
@@ -60,6 +55,7 @@ export function MLPredictions({ binId }: MLPredictionsProps) {
 
     useEffect(() => {
         fetchAnalysis()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [binId])
 
     if (loading) {
@@ -96,15 +92,9 @@ export function MLPredictions({ binId }: MLPredictionsProps) {
                                 <TrendingUp className="h-5 w-5" />
                                 Fill Level Prediction
                             </CardTitle>
-                            <CardDescription>
-                                When will this bin reach full capacity?
-                            </CardDescription>
+                            <CardDescription>When will this bin reach full capacity?</CardDescription>
                         </div>
-                        <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={fetchAnalysis}
-                        >
+                        <Button size="sm" variant="outline" onClick={fetchAnalysis}>
                             <RefreshCw className="h-4 w-4" />
                         </Button>
                     </div>
@@ -119,7 +109,9 @@ export function MLPredictions({ binId }: MLPredictionsProps) {
                                 </div>
                                 <div>
                                     <p className="text-sm text-muted-foreground">Fill Rate</p>
-                                    <p className="text-2xl font-bold">{analysis.prediction.fill_rate_per_hour}%/hour</p>
+                                    <p className="text-2xl font-bold">
+                                        {analysis.prediction.fill_rate_per_hour}%/hour
+                                    </p>
                                 </div>
                             </div>
 
@@ -147,9 +139,41 @@ export function MLPredictions({ binId }: MLPredictionsProps) {
                                     <Gauge className="h-4 w-4 text-muted-foreground" />
                                     <span className="text-sm text-muted-foreground">Confidence</span>
                                 </div>
-                                <Badge variant="secondary">
-                                    {(analysis.prediction.confidence! * 100).toFixed(0)}%
-                                </Badge>
+                                <div className="flex items-center gap-2">
+                                    <Progress
+                                        value={(analysis.prediction.confidence ?? 0) * 100}
+                                        className="w-24 h-2"
+                                    />
+                                    <Badge variant="secondary">
+                                        {((analysis.prediction.confidence ?? 0) * 100).toFixed(0)}%
+                                    </Badge>
+                                </div>
+                            </div>
+
+                            {/* Prediction Quality & Stability */}
+                            <div className="grid grid-cols-2 gap-3 pt-2">
+                                <div className="flex items-center gap-2 p-2 rounded-lg bg-muted/50">
+                                    <span className="text-xs text-muted-foreground">Quality</span>
+                                    <Badge 
+                                        variant="secondary"
+                                        className={cn(
+                                            "text-xs",
+                                            analysis.prediction.prediction_quality === "high" 
+                                                ? "bg-green-100 text-green-700"
+                                                : analysis.prediction.prediction_quality === "medium"
+                                                ? "bg-amber-100 text-amber-700"
+                                                : "bg-gray-100 text-gray-700"
+                                        )}
+                                    >
+                                        {analysis.prediction.prediction_quality ?? "unknown"}
+                                    </Badge>
+                                </div>
+                                <div className="flex items-center gap-2 p-2 rounded-lg bg-muted/50">
+                                    <span className="text-xs text-muted-foreground">Stability</span>
+                                    <Badge variant="secondary" className="text-xs">
+                                        {((analysis.prediction.rate_stability ?? 0) * 100).toFixed(0)}%
+                                    </Badge>
+                                </div>
                             </div>
 
                             <p className="text-xs text-muted-foreground pt-2">
@@ -173,17 +197,28 @@ export function MLPredictions({ binId }: MLPredictionsProps) {
                     </CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                    <div className="flex items-center justify-between p-4 rounded-lg border">
-                        <div>
+                    <div className={cn("flex items-start justify-between p-4 rounded-lg border", 
+                        analysis.collection_recommendation.urgency === "critical"
+                            ? "border-red-200 bg-red-50 dark:border-red-900 dark:bg-red-950/30"
+                            : analysis.collection_recommendation.urgency === "high"
+                            ? "border-orange-200 bg-orange-50 dark:border-orange-900 dark:bg-orange-950/30"
+                            : analysis.collection_recommendation.urgency === "medium"
+                            ? "border-amber-200 bg-amber-50 dark:border-amber-900 dark:bg-amber-950/30"
+                            : "border-green-200 bg-green-50 dark:border-green-900 dark:bg-green-950/30"
+                    )}>
+                        <div className="flex-1">
                             <p className="font-semibold">Collection Required?</p>
-                            <p className="text-sm text-muted-foreground">
+                            <p className="text-sm text-muted-foreground mt-1">
                                 {analysis.collection_recommendation.reason}
                             </p>
                         </div>
                         <Badge
-                            variant={
-                                analysis.collection_recommendation.should_collect ? "destructive" : "secondary"
-                            }
+                            className={cn(
+                                "ml-2",
+                                analysis.collection_recommendation.should_collect
+                                    ? "bg-red-100 text-red-700"
+                                    : "bg-green-100 text-green-700"
+                            )}
                         >
                             {analysis.collection_recommendation.should_collect ? "YES" : "NO"}
                         </Badge>
@@ -194,12 +229,14 @@ export function MLPredictions({ binId }: MLPredictionsProps) {
                             <p className="text-sm text-muted-foreground">Urgency Level</p>
                             <Badge
                                 className={cn(
-                                    "mt-1",
-                                    analysis.collection_recommendation.urgency === "high"
-                                        ? "bg-red-100 text-red-800"
+                                    "mt-2",
+                                    analysis.collection_recommendation.urgency === "critical"
+                                        ? "bg-red-100 text-red-700"
+                                        : analysis.collection_recommendation.urgency === "high"
+                                        ? "bg-orange-100 text-orange-700"
                                         : analysis.collection_recommendation.urgency === "medium"
-                                            ? "bg-amber-100 text-amber-800"
-                                            : "bg-green-100 text-green-800"
+                                        ? "bg-amber-100 text-amber-700"
+                                        : "bg-green-100 text-green-700"
                                 )}
                             >
                                 {analysis.collection_recommendation.urgency.toUpperCase()}
@@ -207,11 +244,24 @@ export function MLPredictions({ binId }: MLPredictionsProps) {
                         </div>
                         <div>
                             <p className="text-sm text-muted-foreground">Recommended Time</p>
-                            <p className="text-sm font-semibold mt-1">
+                            <p className="text-sm font-semibold mt-2">
                                 {analysis.collection_recommendation.recommended_time}
                             </p>
                         </div>
                     </div>
+
+                    {/* Confidence Score */}
+                    {analysis.collection_recommendation.confidence !== undefined && (
+                        <div className="pt-2 border-t">
+                            <div className="flex items-center justify-between mb-2">
+                                <span className="text-sm text-muted-foreground">Recommendation Confidence</span>
+                                <Badge variant="secondary" className="text-xs">
+                                    {(analysis.collection_recommendation.confidence * 100).toFixed(0)}%
+                                </Badge>
+                            </div>
+                            <Progress value={analysis.collection_recommendation.confidence * 100} className="h-2" />
+                        </div>
+                    )}
                 </CardContent>
             </Card>
 
@@ -222,9 +272,7 @@ export function MLPredictions({ binId }: MLPredictionsProps) {
                         <AlertTriangle className="h-5 w-5" />
                         Anomaly Detection
                     </CardTitle>
-                    <CardDescription>
-                        Unusual sensor readings detected
-                    </CardDescription>
+                    <CardDescription>Unusual sensor readings detected</CardDescription>
                 </CardHeader>
                 <CardContent>
                     {analysis.anomalies && analysis.anomalies.length > 0 ? (
@@ -234,38 +282,49 @@ export function MLPredictions({ binId }: MLPredictionsProps) {
                                     key={idx}
                                     className={cn(
                                         "p-4 rounded-lg border",
-                                        anomaly.severity === "high"
-                                            ? "border-red-200 bg-red-50"
-                                            : "border-amber-200 bg-amber-50"
+                                        anomaly.severity === "critical"
+                                            ? "border-red-200 bg-red-50 dark:border-red-900 dark:bg-red-950/30"
+                                            : anomaly.severity === "high"
+                                            ? "border-orange-200 bg-orange-50 dark:border-orange-900 dark:bg-orange-950/30"
+                                            : "border-amber-200 bg-amber-50 dark:border-amber-900 dark:bg-amber-950/30"
                                     )}
                                 >
-                                    <div className="flex items-start justify-between">
-                                        <div>
-                                            <p className="font-semibold capitalize">{anomaly.metric}</p>
-                                            <p className="text-sm text-muted-foreground mt-1">
-                                                Current Value: <strong>{anomaly.current_value}</strong>
-                                            </p>
-                                            <p className="text-sm text-muted-foreground">
-                                                Expected Range: {anomaly.expected_range[0]} -{" "}
-                                                {anomaly.expected_range[1]}
-                                            </p>
-                                            <p className="text-sm text-muted-foreground">
-                                                Z-Score: {anomaly.z_score}
-                                            </p>
-                                        </div>
+                                    <div className="flex items-start justify-between mb-2">
+                                        <p className="font-semibold capitalize text-sm">{anomaly.metric}</p>
                                         <Badge
-                                            variant={anomaly.severity === "high" ? "destructive" : "secondary"}
+                                            className={cn(
+                                                "text-xs",
+                                                anomaly.severity === "critical"
+                                                    ? "bg-red-100 text-red-700"
+                                                    : anomaly.severity === "high"
+                                                    ? "bg-orange-100 text-orange-700"
+                                                    : "bg-amber-100 text-amber-700"
+                                            )}
                                         >
                                             {anomaly.severity.toUpperCase()}
                                         </Badge>
+                                    </div>
+                                    <div className="space-y-1 text-xs text-muted-foreground">
+                                        <p>
+                                            <strong>Current Value:</strong> {anomaly.current_value}
+                                        </p>
+                                        <p>
+                                            <strong>Expected Mean:</strong> {anomaly.expected_mean?.toFixed(1) ?? "—"}
+                                        </p>
+                                        <p>
+                                            <strong>Normal Range:</strong> {anomaly.expected_range[0]} – {anomaly.expected_range[1]}
+                                        </p>
+                                        <p>
+                                            <strong>Z-Score:</strong> {anomaly.z_score} {anomaly.baseline_points && <span className="text-muted-foreground">({anomaly.baseline_points} baseline points)</span>}
+                                        </p>
                                     </div>
                                 </div>
                             ))}
                         </div>
                     ) : (
-                        <div className="flex items-center gap-2 p-4 rounded-lg border border-green-200 bg-green-50">
-                            <CheckCircle className="h-5 w-5 text-green-600" />
-                            <p className="text-green-900">No anomalies detected. All readings are normal.</p>
+                        <div className="flex items-center gap-2 p-4 rounded-lg border border-green-200 bg-green-50 dark:border-green-900 dark:bg-green-950/30">
+                            <CheckCircle className="h-5 w-5 text-green-600 shrink-0" />
+                            <p className="text-green-900 dark:text-green-400 text-sm">No anomalies detected. All readings are normal.</p>
                         </div>
                     )}
                 </CardContent>
@@ -279,39 +338,39 @@ export function MLPredictions({ binId }: MLPredictionsProps) {
                             <Activity className="h-5 w-5" />
                             Hourly Usage Pattern
                         </CardTitle>
-                        <CardDescription>
-                            Average fill rate by hour of day
-                        </CardDescription>
+                        <CardDescription>Average fill rate by hour of day</CardDescription>
                     </CardHeader>
                     <CardContent>
                         <div className="space-y-2">
-                            {Object.entries(analysis.usage_pattern).map(([hour, rate]) => (
-                                <div key={hour} className="flex items-center justify-between">
-                                    <span className="text-sm font-medium">Hour {hour}:00</span>
-                                    <div className="flex-1 mx-4">
-                                        <div className="h-2 rounded-full bg-gray-200">
-                                            <div
-                                                className="h-2 rounded-full bg-blue-500"
-                                                style={{
-                                                    width: `${Math.min((rate as number) * 5, 100)}%`,
-                                                }}
-                                            />
+                            {Object.entries(analysis.usage_pattern)
+                                .sort(([a], [b]) => Number(a) - Number(b))
+                                .map(([hour, rate]) => (
+                                    <div key={hour} className="flex items-center gap-3">
+                                        <span className="text-xs font-mono text-muted-foreground w-10 shrink-0">
+                                            {String(hour).padStart(2, "0")}:00
+                                        </span>
+                                        <div className="flex-1">
+                                            <div className="h-2 rounded-full bg-gray-100">
+                                                <div
+                                                    className="h-2 rounded-full bg-blue-500 transition-all"
+                                                    style={{
+                                                        width: `${Math.min((rate as number) * 5, 100)}%`,
+                                                    }}
+                                                />
+                                            </div>
                                         </div>
+                                        <span className="text-xs text-muted-foreground w-14 text-right shrink-0">
+                                            {(rate as number).toFixed(1)}%/h
+                                        </span>
                                     </div>
-                                    <span className="text-sm text-muted-foreground w-12 text-right">
-                                        {(rate as number).toFixed(1)}%/h
-                                    </span>
-                                </div>
-                            ))}
+                                ))}
                         </div>
                     </CardContent>
                 </Card>
             )}
 
-            {/* Analysis Timestamp */}
             <p className="text-xs text-muted-foreground text-center">
-                Analysis generated at{" "}
-                {new Date(analysis.analysis_timestamp).toLocaleString()}
+                Analysis generated at {new Date(analysis.analysis_timestamp).toLocaleString()}
             </p>
         </div>
     )

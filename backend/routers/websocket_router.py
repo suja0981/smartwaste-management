@@ -79,15 +79,25 @@ class ConnectionManager:
         return len(self._connections)
 
     async def broadcast(self, message: dict) -> None:
-        """Send a JSON message to every connected client; drop dead connections."""
+        """
+        Send a JSON message to every connected client; drop dead connections.
+        
+        FIXED: Race condition handling — safely removes dead connections even if
+        they were removed concurrently by a disconnect() call from another task.
+        """
         dead: List[WebSocket] = []
+        # Create snapshot of connections at broadcast time
         for ws in list(self._connections):
             try:
                 await ws.send_json(message)
-            except Exception:
+            except Exception as e:
+                logger.debug(f"[WS] Send failed, marking connection as dead: {e}")
                 dead.append(ws)
+        
+        # Safely remove dead connections — ignore if already removed
         for ws in dead:
-            self.disconnect(ws)
+            if ws in self._connections:
+                self.disconnect(ws)
 
     async def broadcast_bin_update(
         self,

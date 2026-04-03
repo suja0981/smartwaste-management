@@ -3,8 +3,10 @@
 import { useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
 import { useToast } from "@/hooks/use-toast"
 import { createBin, type CreateBinRequest } from "@/lib/api-client"
+import { Plus, MapPin } from "lucide-react"
 
 type Props = {
     onSuccess: () => void
@@ -15,23 +17,55 @@ export function AddBinDialog({ onSuccess }: Props) {
     const [open, setOpen] = useState(false)
     const [loading, setLoading] = useState(false)
 
-    const [form, setForm] = useState({
+    const emptyForm = {
         id: "",
         location: "",
-        location_type: "Residential",
         capacity_liters: "",
         fill_level_percent: "0",
-    })
+        latitude: "",
+        longitude: "",
+    }
+    const [form, setForm] = useState(emptyForm)
+    const [errors, setErrors] = useState<Partial<typeof emptyForm>>({})
+
+    const set = (field: keyof typeof emptyForm) => (e: React.ChangeEvent<HTMLInputElement>) => {
+        setForm((f) => ({ ...f, [field]: e.target.value }))
+        setErrors((err) => ({ ...err, [field]: undefined }))
+    }
+
+    const validate = () => {
+        const next: Partial<typeof emptyForm> = {}
+        if (!form.id.trim()) next.id = "Bin ID is required"
+        if (!form.location.trim()) next.location = "Location is required"
+        if (!form.capacity_liters || Number(form.capacity_liters) < 1)
+            next.capacity_liters = "Capacity must be at least 1 litre"
+        const fillNum = Number(form.fill_level_percent)
+        if (isNaN(fillNum) || fillNum < 0 || fillNum > 100)
+            next.fill_level_percent = "Fill level must be 0 – 100"
+        if (form.latitude !== "") {
+            const lat = Number(form.latitude)
+            if (isNaN(lat) || lat < -90 || lat > 90) next.latitude = "Latitude must be between −90 and 90"
+        }
+        if (form.longitude !== "") {
+            const lng = Number(form.longitude)
+            if (isNaN(lng) || lng < -180 || lng > 180) next.longitude = "Longitude must be between −180 and 180"
+        }
+        setErrors(next)
+        return Object.keys(next).length === 0
+    }
 
     const handleSubmit = async () => {
+        if (!validate()) return
         try {
             setLoading(true)
 
             const binData: CreateBinRequest = {
-                id: form.id,
-                location: form.location,
+                id: form.id.trim(),
+                location: form.location.trim(),
                 capacity_liters: Number(form.capacity_liters),
                 fill_level_percent: Number(form.fill_level_percent),
+                ...(form.latitude !== "" && { latitude: Number(form.latitude) }),
+                ...(form.longitude !== "" && { longitude: Number(form.longitude) }),
             }
 
             await createBin(binData)
@@ -42,7 +76,8 @@ export function AddBinDialog({ onSuccess }: Props) {
             })
 
             setOpen(false)
-            setForm({ id: "", location: "", location_type: "Residential", capacity_liters: "", fill_level_percent: "0" })
+            setForm(emptyForm)
+            setErrors({})
             onSuccess()
         } catch (e) {
             toast({
@@ -55,64 +90,122 @@ export function AddBinDialog({ onSuccess }: Props) {
         }
     }
 
+    const handleClose = () => {
+        setOpen(false)
+        setForm(emptyForm)
+        setErrors({})
+    }
+
     return (
         <>
             <Button size="sm" onClick={() => setOpen(true)}>
-                + Add Bin
+                <Plus className="h-4 w-4 mr-1" />
+                Add Bin
             </Button>
 
             {open && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-                    <div className="bg-background rounded-lg p-6 w-full max-w-md space-y-4">
-                        <h3 className="text-lg font-semibold">Add New Bin</h3>
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+                    <div className="bg-background rounded-lg shadow-lg w-full max-w-md">
+                        <div className="p-6 space-y-4">
+                            <h3 className="text-lg font-semibold">Add New Bin</h3>
 
-                        <Input
-                            placeholder="Bin ID"
-                            value={form.id}
-                            onChange={(e) => setForm({ ...form, id: e.target.value })}
-                        />
+                            {/* Bin ID */}
+                            <div className="space-y-1">
+                                <Label htmlFor="add-bin-id">Bin ID <span className="text-destructive">*</span></Label>
+                                <Input
+                                    id="add-bin-id"
+                                    placeholder="e.g. bin01"
+                                    value={form.id}
+                                    onChange={set("id")}
+                                    className={errors.id ? "border-destructive" : ""}
+                                />
+                                {errors.id && <p className="text-xs text-destructive">{errors.id}</p>}
+                            </div>
 
-                        <Input
-                            placeholder="Location"
-                            value={form.location}
-                            onChange={(e) => setForm({ ...form, location: e.target.value })}
-                        />
+                            {/* Location */}
+                            <div className="space-y-1">
+                                <Label htmlFor="add-bin-loc">Location <span className="text-destructive">*</span></Label>
+                                <Input
+                                    id="add-bin-loc"
+                                    placeholder="e.g. Gandhi Nagar Market"
+                                    value={form.location}
+                                    onChange={set("location")}
+                                    className={errors.location ? "border-destructive" : ""}
+                                />
+                                {errors.location && <p className="text-xs text-destructive">{errors.location}</p>}
+                            </div>
 
-                        <select
-                            className="w-full border rounded-md px-3 py-2 bg-background"
-                            value={form.location_type}
-                            onChange={(e) =>
-                                setForm({ ...form, location_type: e.target.value })
-                            }
-                        >
-                            <option>Residential</option>
-                            <option>Commercial</option>
-                            <option>Industrial</option>
-                        </select>
+                            {/* Lat / Lng side-by-side */}
+                            <div className="space-y-1">
+                                <Label className="flex items-center gap-1">
+                                    <MapPin className="h-3.5 w-3.5 text-muted-foreground" />
+                                    GPS Coordinates <span className="text-xs text-muted-foreground ml-1">(optional)</span>
+                                </Label>
+                                <div className="grid grid-cols-2 gap-2">
+                                    <div>
+                                        <Input
+                                            placeholder="Latitude"
+                                            type="number"
+                                            step="any"
+                                            value={form.latitude}
+                                            onChange={set("latitude")}
+                                            className={errors.latitude ? "border-destructive" : ""}
+                                        />
+                                        {errors.latitude && <p className="text-xs text-destructive mt-0.5">{errors.latitude}</p>}
+                                    </div>
+                                    <div>
+                                        <Input
+                                            placeholder="Longitude"
+                                            type="number"
+                                            step="any"
+                                            value={form.longitude}
+                                            onChange={set("longitude")}
+                                            className={errors.longitude ? "border-destructive" : ""}
+                                        />
+                                        {errors.longitude && <p className="text-xs text-destructive mt-0.5">{errors.longitude}</p>}
+                                    </div>
+                                </div>
+                            </div>
 
-                        <Input
-                            placeholder="Capacity (liters)"
-                            type="number"
-                            value={form.capacity_liters}
-                            onChange={(e) => setForm({ ...form, capacity_liters: e.target.value })}
-                        />
+                            {/* Capacity */}
+                            <div className="space-y-1">
+                                <Label htmlFor="add-bin-cap">Capacity (litres) <span className="text-destructive">*</span></Label>
+                                <Input
+                                    id="add-bin-cap"
+                                    placeholder="e.g. 100"
+                                    type="number"
+                                    min="1"
+                                    value={form.capacity_liters}
+                                    onChange={set("capacity_liters")}
+                                    className={errors.capacity_liters ? "border-destructive" : ""}
+                                />
+                                {errors.capacity_liters && <p className="text-xs text-destructive">{errors.capacity_liters}</p>}
+                            </div>
 
-                        <Input
-                            placeholder="Initial Fill Level (%)"
-                            type="number"
-                            min="0"
-                            max="100"
-                            value={form.fill_level_percent}
-                            onChange={(e) => setForm({ ...form, fill_level_percent: e.target.value })}
-                        />
+                            {/* Fill Level */}
+                            <div className="space-y-1">
+                                <Label htmlFor="add-bin-fill">Initial Fill Level (%)</Label>
+                                <Input
+                                    id="add-bin-fill"
+                                    placeholder="0"
+                                    type="number"
+                                    min="0"
+                                    max="100"
+                                    value={form.fill_level_percent}
+                                    onChange={set("fill_level_percent")}
+                                    className={errors.fill_level_percent ? "border-destructive" : ""}
+                                />
+                                {errors.fill_level_percent && <p className="text-xs text-destructive">{errors.fill_level_percent}</p>}
+                            </div>
 
-                        <div className="flex justify-end gap-2">
-                            <Button variant="outline" onClick={() => setOpen(false)}>
-                                Cancel
-                            </Button>
-                            <Button onClick={handleSubmit} disabled={loading}>
-                                {loading ? "Saving..." : "Add Bin"}
-                            </Button>
+                            <div className="flex justify-end gap-2 pt-2">
+                                <Button variant="outline" onClick={handleClose} disabled={loading}>
+                                    Cancel
+                                </Button>
+                                <Button onClick={handleSubmit} disabled={loading}>
+                                    {loading ? "Saving…" : "Add Bin"}
+                                </Button>
+                            </div>
                         </div>
                     </div>
                 </div>

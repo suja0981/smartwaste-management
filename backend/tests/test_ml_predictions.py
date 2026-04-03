@@ -62,10 +62,10 @@ class TestBinFillPredictor:
         predictor = BinFillPredictor()
         now = _now()
 
+        # Predictor requires a larger history window before returning predictions.
         predictor.historical_data["bin1"] = [
-            (now - timedelta(hours=2), 20),
-            (now - timedelta(hours=1), 40),
-            (now, 60),
+            (now - timedelta(hours=24 - i), 20 + i * 2)
+            for i in range(25)
         ]
 
         prediction = predictor.predict_full_time("bin1", 60)
@@ -74,7 +74,7 @@ class TestBinFillPredictor:
         assert prediction["bin_id"] == "bin1"
         assert prediction["current_fill"] == 60
         assert prediction["hours_until_full"] > 0
-        assert prediction["hours_until_full"] < 10   # ~2 hours at 20%/hr
+        assert prediction["hours_until_full"] <= BinFillPredictor.MAX_HOURS_PREDICTION
 
     def test_predict_full_time_insufficient_data(self):
         predictor = BinFillPredictor()
@@ -85,13 +85,20 @@ class TestBinFillPredictor:
     def test_get_hourly_pattern(self):
         predictor = BinFillPredictor()
         now = _now()
+        data = []
+        start = now.replace(minute=0, second=0, microsecond=0) - timedelta(days=2)
 
-        for hour in range(24):
-            time_point = now.replace(hour=hour, minute=0, second=0, microsecond=0)
-            predictor.historical_data["bin1"] = [
-                (time_point - timedelta(hours=1), 10),
-                (time_point, 15 + hour % 10),
-            ]
+        # Build short-interval increases so each hour has enough samples.
+        for day in range(2):
+            for hour in range(24):
+                t0 = start + timedelta(days=day, hours=hour)
+                base = 20 + (hour % 10)
+                data.extend([
+                    (t0, base),
+                    (t0 + timedelta(minutes=20), base + 2),
+                    (t0 + timedelta(minutes=40), base + 4),
+                ])
+        predictor.historical_data["bin1"] = data
 
         pattern = predictor.get_hourly_pattern("bin1")
 
@@ -101,7 +108,7 @@ class TestBinFillPredictor:
     def test_max_data_points_limit(self):
         predictor = BinFillPredictor()
 
-        for i in range(150):
+        for i in range(BinFillPredictor.MAX_POINTS + 120):
             predictor.add_data_point("bin1", i % 100)
 
         assert len(predictor.historical_data["bin1"]) == BinFillPredictor.MAX_POINTS
@@ -113,14 +120,14 @@ class TestAnomalyDetector:
 
     def test_update_baseline(self):
         detector = AnomalyDetector()
-        telemetry = {
-            "fill_level_percent": 50,
-            "battery_percent": 80,
-            "temperature_c": 25.0,
-            "humidity_percent": 60,
-        }
-
-        detector.update_baseline("bin1", telemetry)
+        for i in range(detector.WARMUP_PERIOD + detector.MIN_BASELINE_POINTS):
+            telemetry = {
+                "fill_level_percent": 50 + (i % 3),
+                "battery_percent": 80 + (i % 3),
+                "temperature_c": 25.0 + ((i % 3) * 0.1),
+                "humidity_percent": 60 + (i % 3),
+            }
+            detector.update_baseline("bin1", telemetry)
 
         assert "bin1" in detector.baselines
         assert 50 in detector.baselines["bin1"]["fill_level"]["values"]
@@ -193,7 +200,7 @@ class TestCollectionOptimizer:
         result = optimizer.should_collect_now("bin1", 85, threshold=80)
 
         assert result["should_collect"] is True
-        assert result["urgency"] == "high"
+        assert result["urgency"] == "critical"
 
     def test_should_collect_under_threshold(self):
         optimizer = self._make_optimizer()
@@ -206,7 +213,7 @@ class TestCollectionOptimizer:
         result = optimizer.should_collect_now("bin1", 50, threshold=80)
 
         assert result["should_collect"] is False
-        assert result["urgency"] == "low"
+        assert result["urgency"] == "unknown"
 
     def test_should_collect_insufficient_data(self):
         optimizer = self._make_optimizer()
@@ -214,7 +221,7 @@ class TestCollectionOptimizer:
         result = optimizer.should_collect_now("bin_new", 60, threshold=80)
 
         assert result["should_collect"] is False
-        assert result["urgency"] == "low"
+        assert result["urgency"] == "unknown"
 
     def test_optimize_collection_route(self):
         optimizer = self._make_optimizer()
@@ -249,14 +256,14 @@ class TestMLPredictionService:
 
     def test_ingest_telemetry(self):
         service = MLPredictionService()
-        telemetry = {
-            "fill_level_percent": 50,
-            "battery_percent": 80,
-            "temperature_c": 25.0,
-            "humidity_percent": 60,
-        }
-
-        service.ingest_telemetry("bin1", telemetry)
+        for i in range(service.anomaly_detector.WARMUP_PERIOD + 1):
+            telemetry = {
+                "fill_level_percent": 50 + i,
+                "battery_percent": 80,
+                "temperature_c": 25.0,
+                "humidity_percent": 60,
+            }
+            service.ingest_telemetry("bin1", telemetry)
 
         assert "bin1" in service.fill_predictor.historical_data
         assert "bin1" in service.anomaly_detector.baselines

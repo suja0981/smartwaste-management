@@ -1,73 +1,89 @@
 "use client"
 
-/**
- * components/modern-dashboard-widgets.tsx
- *
- * Performance fixes:
- *  1. ModernDashboardStats and ModernBinStatus were TWO separate components
- *     each calling getBins() independently and polling every 5s — 2 network
- *     requests every 5s for the same data.
- *     Now a single shared context provides the data to both components.
- *  2. Stats object is memoized.
- *  3. Polling interval increased to 10s (sufficient for waste management).
- *  4. setLoading(true) only on initial load — no flicker on background polls.
- */
-
-import { useEffect, useState, useCallback, useMemo, createContext, useContext } from "react"
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react"
+import type { ElementType, ReactNode } from "react"
+import { useQuery } from "@tanstack/react-query"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Progress } from "@/components/ui/progress"
 import { useToast } from "@/hooks/use-toast"
+import { useAuth } from "@/contexts/auth-context"
 import { getBins, type Bin } from "@/lib/api-client"
+import { mergeRealtimeBinUpdates, useRealtimeBins } from "@/hooks/useRealtimeBins"
 import { mapBinStatus, getStatusColor, getStatusText, formatTimestamp } from "@/lib/status-mapper"
-import { Trash2, AlertTriangle, CheckCircle, TrendingUp, Activity, MapPin, Loader2, Shield } from "lucide-react"
+import { Trash2, AlertTriangle, Activity, MapPin, Loader2, Shield } from "lucide-react"
 import { cn } from "@/lib/utils"
 
-const POLL_INTERVAL = 10_000
-
-// ─── Shared data context ─────────────────────────────────────────────────────
+const POLL_INTERVAL = 60_000
 
 interface BinDataCtx {
   bins: Bin[]
   initialLoading: boolean
+  realtimeConnected: boolean
   refresh: () => void
 }
 
 const BinDataContext = createContext<BinDataCtx>({
   bins: [],
   initialLoading: true,
+  realtimeConnected: false,
   refresh: () => {},
 })
 
-export function BinDataProvider({ children }: { children: React.ReactNode }) {
-  const [bins, setBins] = useState<Bin[]>([])
-  const [initialLoading, setInitialLoading] = useState(true)
+export function BinDataProvider({ children }: { children: ReactNode }) {
+  const seenAlerts = useRef<Set<string>>(new Set())
   const { toast } = useToast()
+  const { token } = useAuth()
+  const { binUpdates, connected, alertQueue, dismissAlert } = useRealtimeBins(token, !!token)
 
-  const fetchBins = useCallback(async (silent = false) => {
-    try {
-      setBins(await getBins())
-    } catch (error) {
-      if (!silent)
-        toast({
-          title: "Error",
-          description: "Failed to load bin data",
-          variant: "destructive",
-        })
-    } finally {
-      setInitialLoading(false)
-    }
-  }, [toast])
+  const { data: fetchedBins = [], isLoading: initialLoading, refetch } = useQuery({
+    queryKey: ["bins"],
+    queryFn: () => getBins(),
+    refetchInterval: POLL_INTERVAL,
+    staleTime: 15_000,
+  })
+
+  const [displayBins, setDisplayBins] = useState<Bin[]>(fetchedBins)
 
   useEffect(() => {
-    fetchBins(false)
-    const id = setInterval(() => fetchBins(true), POLL_INTERVAL)
-    return () => clearInterval(id)
-  }, [fetchBins])
+    setDisplayBins(fetchedBins)
+  }, [fetchedBins])
+
+  useEffect(() => {
+    setDisplayBins((current) => mergeRealtimeBinUpdates(current, binUpdates))
+  }, [binUpdates])
+
+  useEffect(() => {
+    const nextAlert = alertQueue[0]
+    if (!nextAlert) return
+
+    const alertKey = `${nextAlert.bin_id}:${nextAlert.level}:${nextAlert.timestamp}`
+    if (seenAlerts.current.has(alertKey)) {
+      dismissAlert(0)
+      return
+    }
+
+    seenAlerts.current.add(alertKey)
+    toast({
+      title: nextAlert.level === "critical" ? "Critical bin alert" : "Bin warning",
+      description: nextAlert.message,
+      variant: nextAlert.level === "critical" ? "destructive" : "default",
+    })
+    dismissAlert(0)
+  }, [alertQueue, dismissAlert, toast])
 
   return (
-    <BinDataContext.Provider value={{ bins, initialLoading, refresh: () => fetchBins(false) }}>
+    <BinDataContext.Provider
+      value={{ bins: displayBins, initialLoading, realtimeConnected: connected, refresh: refetch }}
+    >
       {children}
     </BinDataContext.Provider>
   )
@@ -77,119 +93,137 @@ function useBinData() {
   return useContext(BinDataContext)
 }
 
-// ─── Stats cards ─────────────────────────────────────────────────────────────
+interface StatCardProps {
+  label: string
+  value: string | number
+  sub: string
+  icon: ElementType
+  accent: "blue" | "red" | "green" | "purple"
+}
+
+const accentMap = {
+  blue: {
+    bg: "bg-sky-50 dark:bg-sky-950/40",
+    icon: "text-sky-600 dark:text-sky-400",
+    val: "text-sky-700 dark:text-sky-300",
+  },
+  red: {
+    bg: "bg-rose-50 dark:bg-rose-950/40",
+    icon: "text-rose-600 dark:text-rose-400",
+    val: "text-rose-700 dark:text-rose-300",
+  },
+  green: {
+    bg: "bg-emerald-50 dark:bg-emerald-950/40",
+    icon: "text-emerald-600 dark:text-emerald-400",
+    val: "text-emerald-700 dark:text-emerald-300",
+  },
+  purple: {
+    bg: "bg-violet-50 dark:bg-violet-950/40",
+    icon: "text-violet-600 dark:text-violet-400",
+    val: "text-violet-700 dark:text-violet-300",
+  },
+}
+
+function StatCard({ label, value, sub, icon: Icon, accent }: StatCardProps) {
+  const colors = accentMap[accent]
+
+  return (
+    <div className={cn("rounded-xl p-4 flex items-start gap-3", colors.bg)}>
+      <div className={cn("mt-0.5 rounded-lg bg-white/70 p-2 shadow-sm dark:bg-black/20", colors.icon)}>
+        <Icon className="h-4 w-4" />
+      </div>
+      <div className="min-w-0 flex-1">
+        <p className="text-xs font-medium text-muted-foreground">{label}</p>
+        <p className={cn("mt-0.5 text-2xl font-bold leading-none", colors.val)}>{value}</p>
+        <p className="mt-1 text-xs text-muted-foreground">{sub}</p>
+      </div>
+    </div>
+  )
+}
 
 export function ModernDashboardStats() {
-  const { bins, initialLoading } = useBinData()
+  const { bins, initialLoading, realtimeConnected } = useBinData()
 
-  const stats = useMemo(() => ({
-    binsOnline: bins.filter((b) => b.status !== "offline").length,
-    total: bins.length,
-    critical: bins.filter((b) => mapBinStatus(b.status) === "critical").length,
-    avgFill:
-      bins.length > 0
-        ? Math.round(bins.reduce((a, b) => a + b.fill_level_percent, 0) / bins.length)
-        : 0,
-  }), [bins])
-
-  const cards = [
-    {
-      label: "Bins Online",
-      value: `${stats.binsOnline}`,
-      sub: `of ${stats.total} total`,
-      icon: Trash2,
-      gradient: "from-cyan-500 to-blue-600",
-      accent: TrendingUp,
-    },
-    {
-      label: "Critical Bins",
-      value: `${stats.critical}`,
-      sub: "need collection",
-      icon: AlertTriangle,
-      gradient: "from-orange-500 to-red-600",
-      accent: Activity,
-    },
-    {
-      label: "System Health",
-      value: "Healthy",
-      sub: "all sensors active",
-      icon: Activity,
-      gradient: "from-emerald-500 to-teal-600",
-      accent: CheckCircle,
-    },
-    {
-      label: "Avg Fill Level",
-      value: `${stats.avgFill}%`,
-      sub: "across all bins",
-      icon: Shield,
-      gradient: "from-violet-500 to-purple-600",
-      accent: CheckCircle,
-    },
-  ]
+  const stats = useMemo(
+    () => ({
+      binsOnline: bins.filter((bin) => bin.status !== "offline").length,
+      total: bins.length,
+      critical: bins.filter((bin) => mapBinStatus(bin.status) === "critical").length,
+      avgFill:
+        bins.length > 0
+          ? Math.round(bins.reduce((sum, bin) => sum + bin.fill_level_percent, 0) / bins.length)
+          : 0,
+    }),
+    [bins]
+  )
 
   if (initialLoading) {
     return (
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-        {cards.map((_, i) => (
-          <Card key={i} className="border-0 shadow-sm">
-            <CardContent className="p-6">
-              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground mx-auto" />
-            </CardContent>
-          </Card>
+      <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-4">
+        {[...Array(4)].map((_, index) => (
+          <div key={index} className="h-[88px] animate-pulse rounded-xl bg-muted/50 p-4" />
         ))}
       </div>
     )
   }
 
   return (
-    <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-      {cards.map(({ label, value, sub, icon: Icon, gradient, accent: Accent }) => (
-        <Card
-          key={label}
-          className={`border-0 bg-gradient-to-br ${gradient} text-white shadow-md`}
-        >
-          <CardContent className="p-5">
-            <div className="flex items-center justify-between mb-3">
-              <div className="p-2 bg-white/20 rounded-lg">
-                <Icon className="h-5 w-5" />
-              </div>
-              <Accent className="h-4 w-4 opacity-60" />
-            </div>
-            <p className="text-xs font-medium opacity-75 mb-0.5">{label}</p>
-            <p className="text-3xl font-bold">{value}</p>
-            <p className="text-xs opacity-60 mt-1">{sub}</p>
-          </CardContent>
-        </Card>
-      ))}
+    <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-4">
+      <StatCard
+        label="Bins Online"
+        value={stats.binsOnline}
+        sub={`of ${stats.total} total`}
+        icon={Trash2}
+        accent="blue"
+      />
+      <StatCard
+        label="Critical Bins"
+        value={stats.critical}
+        sub="need collection"
+        icon={AlertTriangle}
+        accent="red"
+      />
+      <StatCard
+        label="System Health"
+        value={realtimeConnected ? "Live" : "Fallback"}
+        sub={realtimeConnected ? "websocket connected" : "minute refresh active"}
+        icon={Activity}
+        accent="green"
+      />
+      <StatCard
+        label="Avg Fill Level"
+        value={`${stats.avgFill}%`}
+        sub="across all bins"
+        icon={Shield}
+        accent="purple"
+      />
     </div>
   )
 }
 
-// ─── Bin status list ──────────────────────────────────────────────────────────
-
 export function ModernBinStatus() {
-  const { bins, initialLoading } = useBinData()
+  const { bins, initialLoading, realtimeConnected } = useBinData()
 
-  // Show top 6 by fill level descending
   const topBins = useMemo(
-    () => [...bins].sort((a, b) => b.fill_level_percent - a.fill_level_percent).slice(0, 6),
+    () => [...bins].sort((left, right) => right.fill_level_percent - left.fill_level_percent).slice(0, 6),
     [bins]
   )
 
   return (
     <Card className="shadow-sm">
       <CardHeader className="pb-4">
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between gap-3">
           <div>
             <CardTitle className="text-base font-semibold">Live Bin Status</CardTitle>
-            <CardDescription className="text-xs mt-0.5">
-              Real-time monitoring — sorted by fill level
+            <CardDescription className="mt-0.5 text-xs">
+              {realtimeConnected
+                ? "Live feed connected and sorted by fill level"
+                : "Auto-refreshing every minute and sorted by fill level"}
             </CardDescription>
           </div>
-          <div className="flex items-center gap-1.5 px-2 py-1 bg-emerald-50 dark:bg-emerald-900/20 rounded-full border border-emerald-200 dark:border-emerald-800">
-            <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse" />
-            <span className="text-xs font-medium text-emerald-700 dark:text-emerald-400">Live</span>
-          </div>
+          <Badge variant={realtimeConnected ? "default" : "secondary"} className="text-[11px]">
+            {realtimeConnected ? "Live" : "Fallback"}
+          </Badge>
         </div>
       </CardHeader>
       <CardContent>
@@ -198,36 +232,37 @@ export function ModernBinStatus() {
             <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
           </div>
         ) : topBins.length === 0 ? (
-          <div className="text-center py-8 text-muted-foreground">
-            <Trash2 className="h-8 w-8 mx-auto mb-2 opacity-40" />
+          <div className="py-8 text-center text-muted-foreground">
+            <Trash2 className="mx-auto mb-2 h-8 w-8 opacity-40" />
             <p className="text-sm">No bins registered yet.</p>
           </div>
         ) : (
           <div className="space-y-3">
             {topBins.map((bin) => {
               const mappedStatus = mapBinStatus(bin.status)
+
               return (
                 <div
                   key={bin.id}
-                  className="rounded-lg border bg-card p-3 hover:bg-muted/30 transition-colors"
+                  className="rounded-lg border bg-card p-3 transition-colors hover:bg-muted/30"
                 >
-                  <div className="flex items-center justify-between mb-2">
+                  <div className="mb-2 flex items-center justify-between">
                     <div className="flex items-center gap-2">
                       <div
                         className={cn(
-                          "p-1.5 rounded-md",
+                          "rounded-md p-1.5",
                           mappedStatus === "critical"
-                            ? "bg-red-100 dark:bg-red-900/30 text-red-600"
+                            ? "bg-red-100 text-red-600 dark:bg-red-900/30"
                             : mappedStatus === "warning"
-                            ? "bg-amber-100 dark:bg-amber-900/30 text-amber-600"
-                            : "bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600"
+                              ? "bg-amber-100 text-amber-600 dark:bg-amber-900/30"
+                              : "bg-emerald-100 text-emerald-600 dark:bg-emerald-900/30"
                         )}
                       >
                         <Trash2 className="h-3.5 w-3.5" />
                       </div>
                       <div>
                         <p className="text-sm font-semibold">{bin.id}</p>
-                        <p className="text-xs text-muted-foreground flex items-center gap-0.5">
+                        <p className="flex items-center gap-0.5 text-xs text-muted-foreground">
                           <MapPin className="h-2.5 w-2.5" />
                           {bin.location}
                         </p>
@@ -245,7 +280,7 @@ export function ModernBinStatus() {
                     <Progress value={bin.fill_level_percent} className="h-1.5" />
                   </div>
                   {bin.last_telemetry && (
-                    <p className="text-xs text-muted-foreground mt-1.5">
+                    <p className="mt-1.5 text-xs text-muted-foreground">
                       Updated {formatTimestamp(bin.last_telemetry)}
                     </p>
                   )}

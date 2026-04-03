@@ -140,8 +140,66 @@ export async function signup(data: SignupRequest): Promise<AuthResponse> {
   })
 }
 
+export async function loginWithFirebase(idToken: string): Promise<AuthResponse> {
+  return fetchAPI<AuthResponse>("/auth/firebase", {
+    method: "POST",
+    body: JSON.stringify({ id_token: idToken }),
+  })
+}
+
 export async function getCurrentUser(): Promise<AuthUser> {
   return fetchAPI<AuthUser>("/auth/me")
+}
+
+export interface NotificationSettings {
+  criticalBins: boolean
+  routeUpdates: boolean
+  systemAlerts: boolean
+  emailDigest: boolean
+  pushEnabled: boolean
+}
+
+export interface DisplaySettings {
+  compactMode: boolean
+  autoRefresh: boolean
+}
+
+export interface UserSettings {
+  full_name: string
+  email: string
+  notifications: NotificationSettings
+  display: DisplaySettings
+}
+
+export async function getUserSettings(): Promise<UserSettings> {
+  return fetchAPI<UserSettings>("/auth/settings")
+}
+
+export async function updateUserSettings(data: UserSettings): Promise<UserSettings> {
+  return fetchAPI<UserSettings>("/auth/settings", {
+    method: "PUT",
+    body: JSON.stringify(data),
+  })
+}
+
+export async function registerDeviceToken(
+  token: string,
+  platform = "web"
+): Promise<{ registered: boolean; platform: string }> {
+  return fetchAPI("/auth/device-token", {
+    method: "POST",
+    body: JSON.stringify({ token, platform }),
+  })
+}
+
+export async function unregisterDeviceToken(
+  token: string,
+  platform = "web"
+): Promise<{ unregistered: boolean }> {
+  return fetchAPI("/auth/device-token", {
+    method: "DELETE",
+    body: JSON.stringify({ token, platform }),
+  })
 }
 
 /**
@@ -215,6 +273,16 @@ export async function deleteBin(id: string): Promise<void> {
   return fetchAPI<void>(`/bins/${id}`, { method: "DELETE" })
 }
 
+export async function assignBinZone(
+  id: string,
+  zoneId?: string
+): Promise<{ bin_id: string; zone_id?: string | null; updated: boolean }> {
+  const endpoint = zoneId
+    ? `/bins/${id}/zone?zone_id=${encodeURIComponent(zoneId)}`
+    : `/bins/${id}/zone`
+  return fetchAPI(endpoint, { method: "PATCH" })
+}
+
 // ─── Telemetry ────────────────────────────────────────────────────────────────
 
 export interface TelemetryPayload {
@@ -252,8 +320,43 @@ export interface DashboardStats {
   crews: { available: number; active: number }
 }
 
+export interface ZoneStats {
+  total: number
+  full: number
+  warning: number
+  ok: number
+  offline: number
+  average_fill: number
+}
+
+export interface TrendPoint {
+  date: string
+  telemetry_readings: number
+  average_fill: number
+  tasks_created: number
+  tasks_completed: number
+  routes_completed: number
+  bins_collected: number
+  distance_km: number
+}
+
+export interface TrendStats {
+  days: number
+  from: string
+  to: string
+  series: TrendPoint[]
+}
+
 export async function getDashboardStats(): Promise<DashboardStats> {
   return fetchAPI<DashboardStats>("/stats/")
+}
+
+export async function getZoneStats(): Promise<Record<string, ZoneStats>> {
+  return fetchAPI<Record<string, ZoneStats>>("/stats/zones")
+}
+
+export async function getTrendStats(days = 30): Promise<TrendStats> {
+  return fetchAPI<TrendStats>(`/stats/trends?days=${days}`)
 }
 
 // ─── Crews ────────────────────────────────────────────────────────────────────
@@ -321,6 +424,16 @@ export async function getCrewTasks(id: string): Promise<Task[]> {
   return fetchAPI<Task[]>(`/crews/${id}/tasks`)
 }
 
+export async function assignCrewZone(
+  id: string,
+  zoneId?: string
+): Promise<{ crew_id: string; zone_id?: string | null; updated: boolean }> {
+  const endpoint = zoneId
+    ? `/crews/${id}/zone?zone_id=${encodeURIComponent(zoneId)}`
+    : `/crews/${id}/zone`
+  return fetchAPI(endpoint, { method: "PATCH" })
+}
+
 // ─── Tasks ────────────────────────────────────────────────────────────────────
 
 export interface Task {
@@ -365,11 +478,13 @@ export async function getTasks(filters?: {
   status?: string
   priority?: string
   crew_id?: string
+  zone_id?: string
 }): Promise<Task[]> {
   const params = new URLSearchParams()
   if (filters?.status) params.append("status", filters.status)
   if (filters?.priority) params.append("priority", filters.priority)
   if (filters?.crew_id) params.append("crew_id", filters.crew_id)
+  if (filters?.zone_id) params.append("zone_id", filters.zone_id)
   const q = params.toString()
   return fetchAPI<Task[]>(`/tasks${q ? "?" + q : ""}`)
 }
@@ -407,23 +522,28 @@ export interface FillPrediction {
   predicted_full_time?: string
   confidence?: number
   data_points_used?: number
+  rate_stability?: number
+  prediction_quality?: "high" | "medium" | "low"
 }
 
 export interface Anomaly {
   metric: string
   current_value: number
+  expected_mean?: number
   expected_range: [number, number]
   z_score: number
-  severity: "high" | "medium" | "low"
+  severity: "critical" | "high" | "medium" | "low"
+  baseline_points?: number
 }
 
 export interface CollectionRecommendation {
   bin_id: string
   current_fill: number
   should_collect: boolean
-  urgency: "high" | "medium" | "low"
+  urgency: "critical" | "high" | "medium" | "low" | "unknown"
   reason: string
   recommended_time: string
+  confidence?: number
   prediction?: FillPrediction
 }
 
@@ -435,6 +555,7 @@ export interface BinAnalysis {
   collection_recommendation: CollectionRecommendation
   usage_pattern: Record<string, number>
   analysis_timestamp: string
+  data_quality?: Record<string, unknown>
 }
 
 export interface PredictedAlert {
@@ -444,6 +565,16 @@ export interface PredictedAlert {
   hours_until_full: number
   predicted_time: string
   urgency: "high" | "medium" | "low"
+}
+
+export interface PredictionTaskSyncResult {
+  timeframe_hours: number
+  alerts_considered: number
+  created: number
+  updated: number
+  skipped_existing: number
+  task_ids: string[]
+  bin_ids: string[]
 }
 
 export interface MLStats {
@@ -502,8 +633,21 @@ export async function getPredictedAlerts(hoursAhead = 24): Promise<{
   return fetchAPI(`/predictions/alerts/predicted?hours_ahead=${hoursAhead}`)
 }
 
+export async function syncPredictionTasks(
+  hoursAhead = 24
+): Promise<PredictionTaskSyncResult> {
+  return fetchAPI<PredictionTaskSyncResult>(
+    `/predictions/alerts/predicted/tasks?hours_ahead=${hoursAhead}`,
+    { method: "POST" }
+  )
+}
+
 export async function getMLStats(): Promise<MLStats> {
   return fetchAPI<MLStats>("/predictions/stats")
+}
+
+export async function getCollectionPriority(): Promise<string[]> {
+  return fetchAPI<string[]>("/predictions/collection-priority")
 }
 
 // ─── Routes ───────────────────────────────────────────────────────────────────
@@ -515,12 +659,16 @@ export interface RouteWaypoint {
   fill_level: number
   order: number
   estimated_collection_time: number
+  location?: string
+  done?: boolean
+  completed_at?: string
 }
 
 export interface Route {
   id?: string
   route_id?: string
   algorithm: string
+  algorithm_used?: string
   total_distance_km: number
   estimated_time_minutes: number
   bin_count: number
@@ -529,6 +677,9 @@ export interface Route {
   crew_id?: string
   status?: string
   created_at?: string
+  started_at?: string
+  completed_at?: string
+  actual_time_minutes?: number
 }
 
 export interface OptimizeRouteRequest {
@@ -554,13 +705,23 @@ export interface RouteAnalytics {
 }
 
 function normalizeRoute(r: Record<string, unknown>): Route {
+  const routeId = (r.id as string) || (r.route_id as string)
+  const binCount =
+    (r.bin_count as number) ||
+    (Array.isArray(r.bin_ids) ? (r.bin_ids as string[]).length : 0)
+  const totalDistance = Number(r.total_distance_km || 0)
+
   return {
     ...(r as unknown as Route),
-    route_id: (r.id as string) || (r.route_id as string),
+    id: routeId,
+    route_id: routeId,
+    algorithm: (r.algorithm as string) || (r.algorithm_used as string) || "unknown",
+    algorithm_used: (r.algorithm_used as string) || (r.algorithm as string) || "unknown",
     waypoints: Array.isArray(r.waypoints) ? r.waypoints : [],
-    bin_count:
-      (r.bin_count as number) ||
-      (Array.isArray(r.bin_ids) ? (r.bin_ids as string[]).length : 0),
+    bin_count: binCount,
+    efficiency_score:
+      (r.efficiency_score as number) ||
+      (binCount > 0 && totalDistance > 0 ? binCount / totalDistance : 0),
   }
 }
 
@@ -641,6 +802,77 @@ export async function deleteRoute(routeId: string): Promise<void> {
 
 export async function getRouteAnalytics(): Promise<RouteAnalytics> {
   return fetchAPI<RouteAnalytics>("/routes/analytics/performance")
+}
+
+// Driver
+
+export interface DriverTask {
+  id: string
+  title: string
+  priority: string
+  status: string
+  location: string
+  bin_id?: string
+  estimated_time_minutes?: number
+  due_date?: string
+}
+
+export interface DriverWaypoint {
+  bin_id: string
+  location: string
+  latitude?: number
+  longitude?: number
+  fill_level: number
+  order: number
+  estimated_collection_time: number
+  done: boolean
+  completed_at?: string
+}
+
+export interface DriverRoute {
+  id: string
+  status: string
+  total_distance_km: number
+  estimated_time_minutes: number
+  waypoints: DriverWaypoint[]
+  total_waypoints: number
+  completed_waypoints: number
+  progress_percent: number
+}
+
+export async function getDriverTasks(): Promise<DriverTask[]> {
+  return fetchAPI<DriverTask[]>("/driver/tasks")
+}
+
+export async function getCurrentDriverRoute(): Promise<DriverRoute | null> {
+  return fetchAPI<DriverRoute | null>("/driver/route/current")
+}
+
+export async function completeDriverTask(
+  taskId: string
+): Promise<{ message: string; task_id: string; route_completed?: boolean }> {
+  return fetchAPI(`/driver/tasks/${taskId}/complete`, { method: "POST" })
+}
+
+export async function completeDriverWaypoint(
+  routeId: string,
+  binId: string
+): Promise<{ updated: boolean; route_completed: boolean; bin_id: string }> {
+  return fetchAPI(`/driver/route/${routeId}/waypoint-done`, {
+    method: "POST",
+    body: JSON.stringify({ bin_id: binId }),
+  })
+}
+
+export async function updateDriverLocation(data: {
+  latitude: number
+  longitude: number
+  location_name?: string
+}): Promise<{ updated: boolean; crew_id: string }> {
+  return fetchAPI("/driver/location", {
+    method: "POST",
+    body: JSON.stringify(data),
+  })
 }
 
 // ─── Reports ─────────────────────────────────────────────────────────────────

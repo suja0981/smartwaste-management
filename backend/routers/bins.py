@@ -18,33 +18,43 @@ from auth_utils import require_admin
 router = APIRouter()
 
 
+def _bin_to_model(bin_db: BinDB) -> Bin:
+    return Bin(
+        id=bin_db.id,
+        location=bin_db.location,
+        capacity_liters=bin_db.capacity_liters,
+        fill_level_percent=bin_db.fill_level_percent,
+        status=bin_db.status,
+        latitude=bin_db.latitude,
+        longitude=bin_db.longitude,
+        zone_id=bin_db.zone_id,
+    )
+
+
 @router.get("/", response_model=List[Bin])
 def list_bins(
     zone_id: Optional[str] = Query(default=None, description="Filter by zone (Phase 6)"),
     status: Optional[str] = Query(default=None, description="Filter by status: ok|warning|full|offline"),
     min_fill: Optional[int] = Query(default=None, ge=0, le=100, description="Minimum fill level %"),
+    limit: int = Query(default=100, ge=1, le=500, description="Max records to return"),
+    offset: int = Query(default=0, ge=0, description="Number of records to skip"),
     db: Session = Depends(get_db),
 ):
     """Get all bins, optionally filtered by zone, status, or minimum fill level."""
     query = db.query(BinDB)
     if zone_id:
-        query = query.filter(BinDB.zone_id == zone_id)
+        if zone_id == "unassigned":
+            query = query.filter(BinDB.zone_id.is_(None))
+        else:
+            query = query.filter(BinDB.zone_id == zone_id)
     if status:
         query = query.filter(BinDB.status == status)
     if min_fill is not None:
         query = query.filter(BinDB.fill_level_percent >= min_fill)
 
     return [
-        Bin(
-            id=b.id,
-            location=b.location,
-            capacity_liters=b.capacity_liters,
-            fill_level_percent=b.fill_level_percent,
-            status=b.status,
-            latitude=b.latitude,
-            longitude=b.longitude,
-        )
-        for b in query.order_by(BinDB.fill_level_percent.desc()).all()
+        _bin_to_model(b)
+        for b in query.order_by(BinDB.fill_level_percent.desc()).offset(offset).limit(limit).all()
     ]
 
 
@@ -67,15 +77,7 @@ def create_bin(req: CreateBinRequest, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(bin_db)
 
-    return Bin(
-        id=bin_db.id,
-        location=bin_db.location,
-        capacity_liters=bin_db.capacity_liters,
-        fill_level_percent=bin_db.fill_level_percent,
-        status=bin_db.status,
-        latitude=bin_db.latitude,
-        longitude=bin_db.longitude,
-    )
+    return _bin_to_model(bin_db)
 
 
 @router.get("/{bin_id}", response_model=Bin)
@@ -83,15 +85,7 @@ def get_bin(bin_id: str, db: Session = Depends(get_db)):
     bin_db = db.query(BinDB).filter(BinDB.id == bin_id).first()
     if not bin_db:
         raise HTTPException(status_code=404, detail="Bin not found")
-    return Bin(
-        id=bin_db.id,
-        location=bin_db.location,
-        capacity_liters=bin_db.capacity_liters,
-        fill_level_percent=bin_db.fill_level_percent,
-        status=bin_db.status,
-        latitude=bin_db.latitude,
-        longitude=bin_db.longitude,
-    )
+    return _bin_to_model(bin_db)
 
 
 @router.patch("/{bin_id}", response_model=Bin)
@@ -118,15 +112,7 @@ def update_bin(bin_id: str, req: UpdateBinRequest, db: Session = Depends(get_db)
     db.commit()
     db.refresh(bin_db)
 
-    return Bin(
-        id=bin_db.id,
-        location=bin_db.location,
-        capacity_liters=bin_db.capacity_liters,
-        fill_level_percent=bin_db.fill_level_percent,
-        status=bin_db.status,
-        latitude=bin_db.latitude,
-        longitude=bin_db.longitude,
-    )
+    return _bin_to_model(bin_db)
 
 
 @router.patch("/{bin_id}/zone")
@@ -152,7 +138,7 @@ def assign_zone(
 
 
 @router.delete("/{bin_id}", status_code=204)
-def delete_bin(bin_id: str, db: Session = Depends(get_db)):
+def delete_bin(bin_id: str, db: Session = Depends(get_db), _admin=Depends(require_admin)):
     bin_db = db.query(BinDB).filter(BinDB.id == bin_id).first()
     if not bin_db:
         raise HTTPException(status_code=404, detail="Bin not found")

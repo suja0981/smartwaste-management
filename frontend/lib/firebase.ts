@@ -1,110 +1,160 @@
-/**
- * lib/firebase.ts — Firebase client SDK.
- *
- * ROOT CAUSE FIX: Firebase was initialized at module level:
- *
- *   const app = initializeApp(firebaseConfig)   // executed on server → crash
- *   export const auth = getAuth(app)            // executed on server → crash
- *
- * layout.tsx is a Server Component. Even though AuthProvider has 'use client',
- * Next.js statically resolves the full import chain at build time:
- *   layout.tsx → AuthProvider → auth-context.tsx → firebase.ts → firebase/auth
- *
- * firebase/auth uses browser-only APIs (IndexedDB, window, navigator).
- * When those module-level statements execute during SSR, Node.js throws
- * because those globals don't exist on the server.
- *
- * FIX: All Firebase initialization is moved into lazy getter functions.
- * Nothing executes at module level — only type imports and plain config.
- * The getters are only ever called from 'use client' code at runtime in
- * the browser, never during server-side rendering.
- */
+import type { FirebaseApp } from "firebase/app"
+import type { Auth, User, UserCredential } from "firebase/auth"
 
-import type { FirebaseApp } from "firebase/app";
-import type { Auth, User, UserCredential } from "firebase/auth";
-
-// Plain config object — no SDK calls, safe to evaluate anywhere
 const firebaseConfig = {
-  apiKey:"AIzaSyC9n8Xo2l3mLh0s1aZt7vVqjHkKJz5Xo",
-  authDomain:"sgm-project-fc254.firebaseapp.com",
-  projectId:"sgm-project-fc254",
-  storageBucket:"sgm-project-fc254.firebasestorage.app",
-  messagingSenderId:"589768864478",
-  appId:"1:589768864478:web:b8293c62152d91d89f084f",
-  measurementId:"G-5YWNJWRTKD",
-};
-// ─── Lazy singletons (browser-only, never called during SSR) ─────────────────
+  apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
+  authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
+  projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
+  storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
+  appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
+  measurementId: process.env.NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID,
+}
 
-let _app: FirebaseApp | null = null;
-let _auth: Auth | null = null;
+const PUSH_TOKEN_STORAGE_KEY = "swm_push_token"
 
-function getApp(): FirebaseApp {
-  if (_app) return _app;
-  // require() keeps this out of the static import graph the server analyzes
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  const { initializeApp, getApps } = require("firebase/app");
-  _app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApps()[0];
-  return _app!;
+let appSingleton: FirebaseApp | null = null
+let authSingleton: Auth | null = null
+
+function getFirebaseApp(): FirebaseApp {
+  if (appSingleton) return appSingleton
+  const { getApps, initializeApp } = require("firebase/app")
+  appSingleton = getApps().length === 0 ? initializeApp(firebaseConfig) : getApps()[0]
+  return appSingleton as FirebaseApp
 }
 
 export function getFirebaseAuth(): Auth {
-  if (_auth) return _auth;
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  const { getAuth } = require("firebase/auth");
-  _auth = getAuth(getApp());
-  return _auth!;
+  if (authSingleton) return authSingleton
+  const { getAuth } = require("firebase/auth")
+  authSingleton = getAuth(getFirebaseApp())
+  return authSingleton as Auth
 }
 
-// ─── Auth helpers (all use dynamic import — zero server-side execution) ───────
-
 export async function signInWithGoogle(): Promise<UserCredential> {
-  const { GoogleAuthProvider, signInWithPopup } = await import("firebase/auth");
-  const provider = new GoogleAuthProvider();
-  provider.addScope("email");
-  provider.addScope("profile");
-  return signInWithPopup(getFirebaseAuth(), provider);
+  const { GoogleAuthProvider, signInWithPopup } = await import("firebase/auth")
+  const provider = new GoogleAuthProvider()
+  provider.addScope("email")
+  provider.addScope("profile")
+  return signInWithPopup(getFirebaseAuth(), provider)
 }
 
 export async function signInWithEmail(
   email: string,
   password: string
 ): Promise<UserCredential> {
-  const { signInWithEmailAndPassword } = await import("firebase/auth");
-  return signInWithEmailAndPassword(getFirebaseAuth(), email, password);
+  const { signInWithEmailAndPassword } = await import("firebase/auth")
+  return signInWithEmailAndPassword(getFirebaseAuth(), email, password)
 }
 
 export async function registerWithEmail(
   email: string,
   password: string
 ): Promise<UserCredential> {
-  const { createUserWithEmailAndPassword } = await import("firebase/auth");
-  return createUserWithEmailAndPassword(getFirebaseAuth(), email, password);
+  const { createUserWithEmailAndPassword } = await import("firebase/auth")
+  return createUserWithEmailAndPassword(getFirebaseAuth(), email, password)
 }
 
 export async function firebaseSignOut(): Promise<void> {
-  const { signOut } = await import("firebase/auth");
-  return signOut(getFirebaseAuth());
+  const { signOut } = await import("firebase/auth")
+  return signOut(getFirebaseAuth())
 }
 
-export async function getFirebaseIdToken(
-  user: User,
-  forceRefresh = true
-): Promise<string> {
-  return user.getIdToken(forceRefresh);
+export async function getFirebaseIdToken(user: User, forceRefresh = true): Promise<string> {
+  return user.getIdToken(forceRefresh)
 }
 
-/**
- * Subscribes to Firebase auth state changes.
- * Uses require() deliberately — this function is only called inside useEffect
- * in auth-context.tsx (browser only), but we keep require() here so the
- * static import analyzer never pulls firebase/auth into the server bundle.
- */
-export function onAuthStateChanged(
-  callback: (user: User | null) => void
-): () => void {
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  const { onAuthStateChanged: _listen } = require("firebase/auth");
-  return _listen(getFirebaseAuth(), callback);
+export function onAuthStateChanged(callback: (user: User | null) => void): () => void {
+  const { onAuthStateChanged: listen } = require("firebase/auth")
+  return listen(getFirebaseAuth(), callback)
 }
 
-export type { User };
+export async function isPushMessagingSupported(): Promise<boolean> {
+  if (
+    typeof window === "undefined" ||
+    !("Notification" in window) ||
+    !("serviceWorker" in navigator)
+  ) {
+    return false
+  }
+
+  const { isSupported } = await import("firebase/messaging")
+  return isSupported()
+}
+
+export function getStoredPushToken(): string | null {
+  if (typeof window === "undefined") return null
+  return localStorage.getItem(PUSH_TOKEN_STORAGE_KEY)
+}
+
+export function clearStoredPushToken(): void {
+  if (typeof window === "undefined") return
+  localStorage.removeItem(PUSH_TOKEN_STORAGE_KEY)
+}
+
+async function getMessagingRegistration() {
+  return navigator.serviceWorker.register("/firebase-messaging-sw.js")
+}
+
+export async function requestPushPermission(): Promise<NotificationPermission> {
+  if (!(await isPushMessagingSupported())) {
+    throw new Error("This browser does not support push notifications.")
+  }
+
+  if (Notification.permission === "granted") return "granted"
+  return Notification.requestPermission()
+}
+
+export async function registerBrowserPushNotifications(): Promise<string> {
+  if (!(await isPushMessagingSupported())) {
+    throw new Error("This browser does not support push notifications.")
+  }
+
+  const permission = await requestPushPermission()
+  if (permission !== "granted") {
+    throw new Error("Notification permission was denied.")
+  }
+
+  const vapidKey = process.env.NEXT_PUBLIC_FIREBASE_VAPID_KEY
+  if (!vapidKey) {
+    throw new Error("NEXT_PUBLIC_FIREBASE_VAPID_KEY is not configured.")
+  }
+
+  const { getMessaging, getToken } = await import("firebase/messaging")
+  const messaging = getMessaging(getFirebaseApp())
+  const serviceWorkerRegistration = await getMessagingRegistration()
+  const token = await getToken(messaging, {
+    vapidKey,
+    serviceWorkerRegistration,
+  })
+
+  if (!token) {
+    throw new Error("Firebase did not return a push token.")
+  }
+
+  if (typeof window !== "undefined") {
+    localStorage.setItem(PUSH_TOKEN_STORAGE_KEY, token)
+  }
+
+  return token
+}
+
+export async function clearBrowserPushNotifications(): Promise<string | null> {
+  const existingToken = getStoredPushToken()
+  if (!(await isPushMessagingSupported())) {
+    clearStoredPushToken()
+    return existingToken
+  }
+
+  try {
+    const { deleteToken, getMessaging } = await import("firebase/messaging")
+    const messaging = getMessaging(getFirebaseApp())
+    await deleteToken(messaging)
+  } catch {
+    // Best effort: server-side unregistration still clears the backend mapping.
+  }
+
+  clearStoredPushToken()
+  return existingToken
+}
+
+export type { User }

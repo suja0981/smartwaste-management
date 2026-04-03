@@ -28,16 +28,24 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useToast } from "@/hooks/use-toast"
 import { useAuth } from "@/contexts/auth-context"
 import {
-  getDashboardStats, getRouteAnalytics, downloadReport,
-  type DashboardStats, type RouteAnalytics,
+  downloadReport,
+  getDashboardStats,
+  getRouteAnalytics,
+  getTrendStats,
+  getZoneStats,
+  type DashboardStats,
+  type RouteAnalytics,
+  type TrendStats,
+  type ZoneStats,
 } from "@/lib/api-client"
+import { getZoneLabel } from "@/lib/zone-utils"
 import {
   BarChart, Bar, PieChart, Pie, Cell, AreaChart, Area,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
 } from "recharts"
 import {
   TrendingUp, TrendingDown, BarChart3, Download, Loader2,
-  Trash2, Route, Users, CheckCircle,
+  Trash2, Route, Users, CheckCircle, Activity,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 
@@ -56,6 +64,8 @@ const COLORS = [
 export function AnalyticsReports() {
   const [stats, setStats] = useState<DashboardStats | null>(null)
   const [routeAnalytics, setRouteAnalytics] = useState<RouteAnalytics | null>(null)
+  const [zoneStats, setZoneStats] = useState<Record<string, ZoneStats>>({})
+  const [trendStats, setTrendStats] = useState<TrendStats | null>(null)
   const [loading, setLoading] = useState(true)
   const [exporting, setExporting] = useState<"pdf" | "xlsx" | null>(null)
   const { toast } = useToast()
@@ -63,12 +73,16 @@ export function AnalyticsReports() {
 
   const fetchAll = useCallback(async () => {
     try {
-      const [s, r] = await Promise.all([
+      const [s, r, z, t] = await Promise.all([
         getDashboardStats(),
         getRouteAnalytics().catch(() => null),
+        getZoneStats().catch(() => ({})),
+        getTrendStats(30).catch(() => null),
       ])
       setStats(s)
       setRouteAnalytics(r)
+      setZoneStats(z)
+      setTrendStats(t)
     } catch (e) {
       toast({ title: "Error", description: "Failed to load analytics", variant: "destructive" })
     } finally {
@@ -124,6 +138,50 @@ export function AnalyticsReports() {
       { name: "Done", value: stats.tasks.total - stats.tasks.pending - stats.tasks.in_progress },
     ]
   }, [stats])
+
+  const zoneChartData = useMemo(
+    () =>
+      Object.entries(zoneStats)
+        .map(([zoneId, data]) => ({
+          zoneId,
+          zone: getZoneLabel(zoneId),
+          averageFill: data.average_fill,
+          total: data.total,
+          critical: data.full,
+          warning: data.warning,
+        }))
+        .sort((left, right) => right.averageFill - left.averageFill),
+    [zoneStats]
+  )
+
+  const zoneSummary = useMemo(() => {
+    const totalZones = zoneChartData.length
+    const totalAssignedBins = zoneChartData.reduce((sum, zone) => sum + zone.total, 0)
+    const criticalBins = zoneChartData.reduce((sum, zone) => sum + zone.critical, 0)
+    const weightedFillTotal = zoneChartData.reduce(
+      (sum, zone) => sum + zone.averageFill * zone.total,
+      0
+    )
+
+    return {
+      totalZones,
+      totalAssignedBins,
+      criticalBins,
+      averageFill: totalAssignedBins > 0 ? weightedFillTotal / totalAssignedBins : 0,
+    }
+  }, [zoneChartData])
+
+  const trendSeries = useMemo(
+    () =>
+      (trendStats?.series ?? []).map((point) => ({
+        ...point,
+        label: new Date(point.date).toLocaleDateString("en-IN", {
+          day: "2-digit",
+          month: "short",
+        }),
+      })),
+    [trendStats]
+  )
 
   if (loading) {
     return (
@@ -217,6 +275,7 @@ export function AnalyticsReports() {
       <Tabs defaultValue="bins" className="space-y-4">
         <TabsList>
           <TabsTrigger value="bins">Bin Analytics</TabsTrigger>
+          <TabsTrigger value="zones">Zones</TabsTrigger>
           <TabsTrigger value="tasks">Tasks</TabsTrigger>
           <TabsTrigger value="routes">Routes</TabsTrigger>
         </TabsList>
@@ -242,7 +301,9 @@ export function AnalyticsReports() {
                         cy="50%"
                         outerRadius={90}
                         dataKey="value"
-                        label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                        label={({ name, percent }) =>
+                          `${name} ${(typeof percent === "number" ? percent * 100 : 0).toFixed(0)}%`
+                        }
                         labelLine={false}
                       >
                         {binStatusData.map((entry, i) => (
@@ -291,6 +352,69 @@ export function AnalyticsReports() {
             </Card>
           </div>
 
+          <div className="grid gap-4 lg:grid-cols-2">
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">30-Day Fill Trend</CardTitle>
+                <CardDescription>Daily average fill level from telemetry readings.</CardDescription>
+              </CardHeader>
+              <CardContent>
+                {trendSeries.length === 0 ? (
+                  <p className="py-8 text-center text-sm text-muted-foreground">
+                    Not enough telemetry history for a trend chart yet.
+                  </p>
+                ) : (
+                  <ResponsiveContainer width="100%" height={280}>
+                    <AreaChart data={trendSeries}>
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis dataKey="label" tick={{ fontSize: 11 }} />
+                      <YAxis tick={{ fontSize: 11 }} unit="%" />
+                      <Tooltip />
+                      <Area
+                        type="monotone"
+                        dataKey="average_fill"
+                        name="Average Fill"
+                        stroke="hsl(var(--chart-1))"
+                        fill="hsl(var(--chart-1))"
+                        fillOpacity={0.18}
+                        strokeWidth={2}
+                      />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                )}
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Telemetry Activity</CardTitle>
+                <CardDescription>How much live sensor data arrived each day.</CardDescription>
+              </CardHeader>
+              <CardContent>
+                {trendSeries.length === 0 ? (
+                  <p className="py-8 text-center text-sm text-muted-foreground">
+                    Telemetry activity will appear here once readings are stored.
+                  </p>
+                ) : (
+                  <ResponsiveContainer width="100%" height={280}>
+                    <BarChart data={trendSeries}>
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis dataKey="label" tick={{ fontSize: 11 }} />
+                      <YAxis tick={{ fontSize: 11 }} />
+                      <Tooltip />
+                      <Bar
+                        dataKey="telemetry_readings"
+                        name="Telemetry Readings"
+                        fill="hsl(var(--chart-2))"
+                        radius={[4, 4, 0, 0]}
+                      />
+                    </BarChart>
+                  </ResponsiveContainer>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+
           {/* Stats summary table */}
           {stats && (
             <Card>
@@ -321,7 +445,151 @@ export function AnalyticsReports() {
         </TabsContent>
 
         {/* ── Tasks ───────────────────────────────────────────────────────── */}
+        <TabsContent value="zones" className="space-y-4">
+          {zoneChartData.length === 0 ? (
+            <Card>
+              <CardContent className="py-12 text-center text-muted-foreground">
+                <Users className="mx-auto mb-3 h-10 w-10 opacity-30" />
+                <p>No zone data yet.</p>
+                <p className="text-sm">Assign bins to zones to unlock zone-level analytics.</p>
+              </CardContent>
+            </Card>
+          ) : (
+            <>
+              <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+                {[
+                  { label: "Zones tracked", value: zoneSummary.totalZones },
+                  { label: "Bins in zones", value: zoneSummary.totalAssignedBins },
+                  { label: "Critical bins", value: zoneSummary.criticalBins },
+                  { label: "Weighted avg fill", value: `${zoneSummary.averageFill.toFixed(1)}%` },
+                ].map(({ label, value }) => (
+                  <Card key={label}>
+                    <CardHeader className="pb-2">
+                      <CardTitle className="text-sm font-medium text-muted-foreground">{label}</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <p className="text-2xl font-bold">{value}</p>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+
+              <div className="grid gap-4 lg:grid-cols-2">
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-base">Average Fill By Zone</CardTitle>
+                    <CardDescription>Quick view of the busiest operating areas.</CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <ResponsiveContainer width="100%" height={300}>
+                      <BarChart data={zoneChartData}>
+                        <CartesianGrid strokeDasharray="3 3" />
+                        <XAxis dataKey="zone" tick={{ fontSize: 11 }} />
+                        <YAxis tick={{ fontSize: 11 }} unit="%" />
+                        <Tooltip />
+                        <Legend />
+                        <Bar
+                          dataKey="averageFill"
+                          name="Average Fill"
+                          fill="hsl(var(--chart-1))"
+                          radius={[4, 4, 0, 0]}
+                        />
+                        <Bar
+                          dataKey="critical"
+                          name="Critical Bins"
+                          fill="hsl(var(--chart-3))"
+                          radius={[4, 4, 0, 0]}
+                        />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </CardContent>
+                </Card>
+
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-base">Zone Breakdown</CardTitle>
+                    <CardDescription>Operational load by zone.</CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-3">
+                    {zoneChartData.map((zone) => (
+                      <div key={zone.zoneId} className="rounded-lg border p-3">
+                        <div className="flex items-center justify-between gap-3">
+                          <div>
+                            <p className="font-medium">{zone.zone}</p>
+                            <p className="text-xs text-muted-foreground">
+                              {zone.total} bins and {zone.warning} warning
+                            </p>
+                          </div>
+                          <Badge variant={zone.critical > 0 ? "destructive" : "secondary"}>
+                            {zone.critical > 0 ? `${zone.critical} critical` : "Stable"}
+                          </Badge>
+                        </div>
+                        <div className="mt-3 grid grid-cols-3 gap-2 text-sm">
+                          <div className="rounded-md bg-muted/40 p-2 text-center">
+                            <p className="text-xs text-muted-foreground">Avg fill</p>
+                            <p className="font-semibold">{zone.averageFill.toFixed(1)}%</p>
+                          </div>
+                          <div className="rounded-md bg-muted/40 p-2 text-center">
+                            <p className="text-xs text-muted-foreground">Total bins</p>
+                            <p className="font-semibold">{zone.total}</p>
+                          </div>
+                          <div className="rounded-md bg-muted/40 p-2 text-center">
+                            <p className="text-xs text-muted-foreground">Critical</p>
+                            <p className="font-semibold">{zone.critical}</p>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </CardContent>
+                </Card>
+              </div>
+            </>
+          )}
+        </TabsContent>
+
         <TabsContent value="tasks" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Task Throughput Trend</CardTitle>
+              <CardDescription>Daily task creation versus completion over the last 30 days.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              {trendSeries.length === 0 ? (
+                <p className="py-8 text-center text-sm text-muted-foreground">
+                  Task trend data will appear once task activity accumulates.
+                </p>
+              ) : (
+                <ResponsiveContainer width="100%" height={280}>
+                  <AreaChart data={trendSeries}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="label" tick={{ fontSize: 11 }} />
+                    <YAxis tick={{ fontSize: 11 }} />
+                    <Tooltip />
+                    <Legend />
+                    <Area
+                      type="monotone"
+                      dataKey="tasks_created"
+                      name="Tasks Created"
+                      stroke="hsl(var(--chart-4))"
+                      fill="hsl(var(--chart-4))"
+                      fillOpacity={0.18}
+                      strokeWidth={2}
+                    />
+                    <Area
+                      type="monotone"
+                      dataKey="tasks_completed"
+                      name="Tasks Completed"
+                      stroke="hsl(var(--chart-3))"
+                      fill="hsl(var(--chart-3))"
+                      fillOpacity={0.16}
+                      strokeWidth={2}
+                    />
+                  </AreaChart>
+                </ResponsiveContainer>
+              )}
+            </CardContent>
+          </Card>
+
           <div className="grid gap-4 lg:grid-cols-2">
             <Card>
               <CardHeader>
@@ -340,7 +608,9 @@ export function AnalyticsReports() {
                         cy="50%"
                         outerRadius={90}
                         dataKey="value"
-                        label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                        label={({ name, percent }) =>
+                          `${name} ${(typeof percent === "number" ? percent * 100 : 0).toFixed(0)}%`
+                        }
                         labelLine={false}
                       >
                         {taskStatusData.map((_, i) => (
@@ -397,6 +667,82 @@ export function AnalyticsReports() {
 
         {/* ── Routes ──────────────────────────────────────────────────────── */}
         <TabsContent value="routes" className="space-y-4">
+          <div className="grid gap-4 lg:grid-cols-2">
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Route Completion Trend</CardTitle>
+                <CardDescription>Completed routes by day over the last 30 days.</CardDescription>
+              </CardHeader>
+              <CardContent>
+                {trendSeries.length === 0 ? (
+                  <p className="py-8 text-center text-sm text-muted-foreground">
+                    Route history will appear here after completed runs are recorded.
+                  </p>
+                ) : (
+                  <ResponsiveContainer width="100%" height={260}>
+                    <BarChart data={trendSeries}>
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis dataKey="label" tick={{ fontSize: 11 }} />
+                      <YAxis tick={{ fontSize: 11 }} />
+                      <Tooltip />
+                      <Bar
+                        dataKey="routes_completed"
+                        name="Routes Completed"
+                        fill="hsl(var(--chart-5))"
+                        radius={[4, 4, 0, 0]}
+                      />
+                    </BarChart>
+                  </ResponsiveContainer>
+                )}
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Collection Output</CardTitle>
+                <CardDescription>Bins collected and travel distance per day.</CardDescription>
+              </CardHeader>
+              <CardContent>
+                {trendSeries.length === 0 ? (
+                  <p className="py-8 text-center text-sm text-muted-foreground">
+                    Completed route history is needed for this chart.
+                  </p>
+                ) : (
+                  <ResponsiveContainer width="100%" height={260}>
+                    <AreaChart data={trendSeries}>
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis dataKey="label" tick={{ fontSize: 11 }} />
+                      <YAxis yAxisId="left" tick={{ fontSize: 11 }} />
+                      <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 11 }} />
+                      <Tooltip />
+                      <Legend />
+                      <Area
+                        yAxisId="left"
+                        type="monotone"
+                        dataKey="bins_collected"
+                        name="Bins Collected"
+                        stroke="hsl(var(--chart-1))"
+                        fill="hsl(var(--chart-1))"
+                        fillOpacity={0.16}
+                        strokeWidth={2}
+                      />
+                      <Area
+                        yAxisId="right"
+                        type="monotone"
+                        dataKey="distance_km"
+                        name="Distance (km)"
+                        stroke="hsl(var(--chart-2))"
+                        fill="hsl(var(--chart-2))"
+                        fillOpacity={0.12}
+                        strokeWidth={2}
+                      />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+
           {!routeAnalytics || routeAnalytics.total_routes_completed === 0 ? (
             <Card>
               <CardContent className="flex flex-col items-center justify-center py-16 text-muted-foreground gap-3">

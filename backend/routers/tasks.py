@@ -8,7 +8,7 @@ Phase 6: Added zone_id filter to list_tasks.
 import logging
 from typing import List, Optional
 
-from fastapi import APIRouter, HTTPException, Depends, Query
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Depends, Query
 from sqlalchemy.orm import Session
 
 from database import get_db, TaskDB, CrewDB, BinDB
@@ -43,6 +43,8 @@ def list_tasks(
     priority: Optional[str] = Query(default=None),
     crew_id: Optional[str] = Query(default=None),
     zone_id: Optional[str] = Query(default=None, description="Filter by bin zone (Phase 6)"),
+    limit: int = Query(default=100, ge=1, le=500, description="Max records to return"),
+    offset: int = Query(default=0, ge=0, description="Number of records to skip"),
     db: Session = Depends(get_db),
 ):
     """Get all tasks with optional filters."""
@@ -54,13 +56,17 @@ def list_tasks(
     if crew_id:
         query = query.filter(TaskDB.crew_id == crew_id)
     if zone_id:
-        # Join via bin to filter by zone
-        bin_ids_in_zone = [
-            b.id for b in db.query(BinDB).filter(BinDB.zone_id == zone_id).all()
-        ]
-        query = query.filter(TaskDB.bin_id.in_(bin_ids_in_zone))
+        # Use a subquery instead of loading all bin IDs into Python
+        if zone_id == "unassigned":
+            bin_subq = db.query(BinDB.id).filter(BinDB.zone_id.is_(None)).subquery()
+        else:
+            bin_subq = db.query(BinDB.id).filter(BinDB.zone_id == zone_id).subquery()
+        query = query.filter(TaskDB.bin_id.in_(bin_subq))
 
-    return [_task_to_model(t) for t in query.order_by(TaskDB.created_at.desc()).all()]
+    return [
+        _task_to_model(t)
+        for t in query.order_by(TaskDB.created_at.desc()).offset(offset).limit(limit).all()
+    ]
 
 
 @router.post("/", response_model=Task, status_code=201)
@@ -99,7 +105,7 @@ def get_task(task_id: str, db: Session = Depends(get_db)):
 
 
 @router.patch("/{task_id}", response_model=Task)
-def update_task(task_id: str, req: UpdateTaskRequest, db: Session = Depends(get_db)):
+def update_task(task_id: str, req: UpdateTaskRequest, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     task_db = db.query(TaskDB).filter(TaskDB.id == task_id).first()
     if not task_db:
         raise HTTPException(status_code=404, detail="Task not found")
@@ -123,9 +129,9 @@ def update_task(task_id: str, req: UpdateTaskRequest, db: Session = Depends(get_
         task_db.crew_id = req.crew_id
         if task_db.status == "pending":
             task_db.status = "in-progress"
-        # Fire FCM if crew changed
+        # Fire FCM if crew changed — run in background so it never blocks the response
         if old_crew != req.crew_id:
-            _notify_assignment(task_db, db)
+            background_tasks.add_task(_notify_assignment, task_db.id, task_db.title, task_db.location, task_db.crew_id)
     if req.estimated_time_minutes is not None:
         task_db.estimated_time_minutes = req.estimated_time_minutes
     if req.completed_at is not None:
@@ -137,7 +143,7 @@ def update_task(task_id: str, req: UpdateTaskRequest, db: Session = Depends(get_
 
 
 @router.post("/{task_id}/assign", response_model=Task)
-def assign_task(task_id: str, req: AssignTaskRequest, db: Session = Depends(get_db)):
+def assign_task(task_id: str, req: AssignTaskRequest, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     """Assign a task to a crew, auto-start the task and notify the crew (Phase 3)."""
     task_db = db.query(TaskDB).filter(TaskDB.id == task_id).first()
     if not task_db:
@@ -156,8 +162,8 @@ def assign_task(task_id: str, req: AssignTaskRequest, db: Session = Depends(get_
     db.commit()
     db.refresh(task_db)
 
-    # Phase 3: FCM push notification
-    _notify_assignment(task_db, db)
+    # Phase 3: FCM push notification — non-blocking background task
+    background_tasks.add_task(_notify_assignment, task_db.id, task_db.title, task_db.location, task_db.crew_id)
 
     return _task_to_model(task_db)
 
@@ -174,18 +180,23 @@ def delete_task(task_id: str, db: Session = Depends(get_db)):
 
 # ─── Internal helpers ─────────────────────────────────────────────────────────
 
-def _notify_assignment(task: TaskDB, db: Session) -> None:
-    """Fire an FCM push notification when a task is assigned. Non-fatal."""
-    if not task.crew_id:
+def _notify_assignment(task_id: str, task_title: str, location: str | None, crew_id: str | None) -> None:
+    """Fire an FCM push notification when a task is assigned. Runs as a background task. Non-fatal."""
+    if not crew_id:
         return
     try:
+        from database import SessionLocal
         from services.notifications import notify_task_assigned
-        notify_task_assigned(
-            task_id=task.id,
-            task_title=task.title,
-            location=task.location,
-            crew_id=task.crew_id,
-            db=db,
-        )
+        db = SessionLocal()
+        try:
+            notify_task_assigned(
+                task_id=task_id,
+                task_title=task_title,
+                location=location,
+                crew_id=crew_id,
+                db=db,
+            )
+        finally:
+            db.close()
     except Exception as e:
         logger.warning(f"[FCM] Task assignment notification failed: {e}")

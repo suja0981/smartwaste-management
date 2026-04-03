@@ -28,9 +28,7 @@ class Settings(BaseSettings):
     refresh_token_expire_days: int = 7
 
     # ── Database ──────────────────────────────────────────────────────────────
-    # SQLite (default): "sqlite:///./smart_waste.db"
-    # PostgreSQL: "postgresql://user:password@localhost:5432/smart_waste"
-    database_url: str = "sqlite:///./smart_waste.db"
+    database_url: str = ""  # Must be set via DATABASE_URL env var (PostgreSQL)
 
     # ── CORS ──────────────────────────────────────────────────────────────────
     cors_origins: str = "http://localhost:3000,http://localhost:8080,http://127.0.0.1:3000"
@@ -55,6 +53,7 @@ class Settings(BaseSettings):
     # ── IoT API Keys ──────────────────────────────────────────────────────────
     # Prefix makes keys recognisable and prevents accidental use of other secrets
     api_key_prefix: str = "wsk_live_"
+    iot_api_key: Optional[str] = None
 
     class Config:
         env_file = ".env"
@@ -67,6 +66,15 @@ class Settings(BaseSettings):
 
     def is_production(self) -> bool:
         return self.environment.lower() == "production"
+
+    def validate_production_secrets(self) -> None:
+        """Raise at startup if insecure defaults are used in production."""
+        if self.is_production():
+            if self.secret_key == "your-super-secret-key-change-this-in-production":
+                raise RuntimeError(
+                    "SECRET_KEY must be changed before running in production. "
+                    "Generate one with: python -c \"import secrets; print(secrets.token_hex(32))\""
+                )
 
     def firebase_configured(self) -> bool:
         """Returns True if Firebase credentials are available."""
