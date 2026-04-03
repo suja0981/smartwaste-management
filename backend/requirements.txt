@@ -34,7 +34,7 @@ openpyxl==3.1.2                  # Excel generation
 
 # ── Utils ────────────────────────────────────────────────────
 python-multipart==0.0.9          # multipart form data
-
+pydantic[email]==2.8.2                   # for email validation
 # ── ML / numerics ────────────────────────────────────────────
 numpy==1.26.4
 
