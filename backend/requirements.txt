@@ -9,7 +9,7 @@ sqlalchemy==2.0.31
 alembic==1.18.4                  # DB schema migrations
 python-dotenv==1.0.0
 pydantic==2.8.2
-email-validator==2.8.2  
+email-validator==2.3.0
 pydantic-settings==2.2.0
 requests==2.31.0
 
@@ -35,7 +35,6 @@ openpyxl==3.1.2                  # Excel generation
 
 # ── Utils ────────────────────────────────────────────────────
 python-multipart==0.0.9          # multipart form data
-email-validator==2.8.2            # for email validation
 # ── ML / numerics ────────────────────────────────────────────
 numpy==1.26.4
 
