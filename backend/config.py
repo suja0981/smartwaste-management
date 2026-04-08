@@ -31,7 +31,7 @@ class Settings(BaseSettings):
     database_url: str = ""  # Must be set via DATABASE_URL env var (PostgreSQL)
 
     # ── CORS ──────────────────────────────────────────────────────────────────
-    cors_origins: str = "http://localhost:3000,http://localhost:8080,http://127.0.0.1:3000"
+    cors_origins: str = "http://localhost:3000,http://localhost:8080,http://127.0.0.1:3000,http://10.84.200.109"
 
     # ── Logging ───────────────────────────────────────────────────────────────
     log_level: str = "INFO"

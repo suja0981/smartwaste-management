@@ -1,7 +1,9 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState } from "react"
+import { createContext, createElement, useCallback, useContext, useEffect, useRef, useState } from "react"
+import type { ReactNode } from "react"
 import type { Bin } from "@/lib/api-client"
+import { useAuthStore } from "@/store/auth-store"
 
 export interface BinUpdate {
   event: "bin_update"
@@ -95,7 +97,10 @@ export function useRealtimeBins(
   const connect = useCallback(() => {
     if (!token || !enabled || unmounted.current) return
 
-    const socket = new WebSocket(`${WS_BASE}/ws?token=${encodeURIComponent(token)}`)
+    // Security fix: never embed the JWT in the URL — it is logged in plaintext
+    // by every proxy, load balancer, and server access log. Send the token as
+    // the first WebSocket message after the connection is established instead.
+    const socket = new WebSocket(`${WS_BASE}/ws`)
     ws.current = socket
 
     socket.onopen = () => {
@@ -103,13 +108,23 @@ export function useRealtimeBins(
         socket.close()
         return
       }
-      setConnected(true)
-      retryDelay.current = INITIAL_RETRY_MS
+      socket.send(JSON.stringify({ type: "auth", token }))
     }
 
     socket.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data)
+
+        if (data.event === "connected") {
+          setConnected(true)
+          retryDelay.current = INITIAL_RETRY_MS
+          return
+        }
+
+        if (data.event === "auth_error") {
+          socket.close()
+          return
+        }
 
         if (data.event === "bin_update") {
           setBinUpdates((prev) => {
@@ -180,4 +195,32 @@ export function useRealtimeBins(
   }, [])
 
   return { binUpdates, connected, alertQueue, dismissAlert }
+}
+
+// ─── Shared singleton context ───────────────────────────────────────────────────────────
+
+const RealtimeBinsContext = createContext<UseRealtimeBinsReturn | null>(null)
+
+/**
+ * Mount once in the root layout. Reads the auth token from the Zustand store
+ * directly so it needs no props and opens exactly one WebSocket per session.
+ *
+ * Before this fix: BinDataProvider, BinManagementIntegrated, and MapClient
+ * each called useRealtimeBins() independently, opening 3 simultaneous
+ * WebSocket connections to the same endpoint.
+ */
+export function RealtimeBinsProvider({ children }: { children: ReactNode }) {
+  const token = useAuthStore((s) => s.token)
+  const value = useRealtimeBins(token, !!token)
+  return createElement(RealtimeBinsContext.Provider, { value }, children)
+}
+
+/**
+ * Consume the shared WebSocket connection. Throws if RealtimeBinsProvider is
+ * not mounted in the component tree.
+ */
+export function useRealtimeBinsContext(): UseRealtimeBinsReturn {
+  const ctx = useContext(RealtimeBinsContext)
+  if (!ctx) throw new Error("useRealtimeBinsContext: RealtimeBinsProvider not found in tree")
+  return ctx
 }

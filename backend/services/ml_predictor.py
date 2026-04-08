@@ -108,6 +108,21 @@ class BinFillPredictor:
 
         return [r for r in rates if lower <= r <= upper]
 
+    def _has_fill_rate(self, bin_id: str) -> bool:
+        """
+        Pure read: return True if this bin has enough clean data to produce a
+        fill-rate estimate, WITHOUT updating the EMA smoothing state.
+
+        Use this instead of calculate_fill_rate() anywhere you only need to
+        know *whether* a rate exists (e.g. counting bins in get_statistics()),
+        so that statistics reads never corrupt the smoothed-rate history.
+        """
+        rates = self._get_rates(bin_id)
+        if len(rates) < 2:
+            return False
+        clean_rates = self._remove_outliers(rates)
+        return bool(clean_rates) and float(np.median(clean_rates)) > 0
+
     def calculate_fill_rate(self, bin_id: str) -> Optional[float]:
         """
         Returns smoothed, stabilized fill rate in % per hour.
@@ -658,7 +673,7 @@ class MLPredictionService:
         total_pts = sum(len(v) for v in self.fill_predictor.historical_data.values())
         with_pred = sum(
             1 for bid in self.fill_predictor.historical_data
-            if self.fill_predictor.calculate_fill_rate(bid) is not None
+            if self.fill_predictor._has_fill_rate(bid)
         )
         
         # Data quality stats

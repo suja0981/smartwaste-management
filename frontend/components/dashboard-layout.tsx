@@ -240,7 +240,7 @@ function relativeTime(iso?: string | null): string {
 
 function NotificationButton() {
   const { data: bins = [], isLoading } = useQuery<Bin[]>({
-    queryKey: ["notifications-bins"],
+    queryKey: ["bins"],
     queryFn: () => getBins(),
     refetchInterval: 30_000,
     staleTime: 20_000,

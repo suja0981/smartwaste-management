@@ -46,6 +46,7 @@ async function attemptTokenRefresh(): Promise<string | null> {
     if (!res.ok) return null
     const data = await res.json()
     localStorage.setItem(TOKEN_KEY, data.access_token)
+    if (data.refresh_token) localStorage.setItem(REFRESH_TOKEN_KEY, data.refresh_token)
     return data.access_token
   } catch {
     return null
@@ -75,10 +76,11 @@ async function fetchAPI<T>(
     if (newToken) {
       return fetchAPI<T>(endpoint, options, false) // retry once
     }
-    // Refresh failed — clear session and let the ProtectedRoute handle redirect
+    // Refresh failed — clear all stored credentials so the next render/navigation
+    // sees an unauthenticated state and ProtectedRoute can redirect to login.
     localStorage.removeItem(TOKEN_KEY)
     localStorage.removeItem(REFRESH_TOKEN_KEY)
-    localStorage.removeItem("swm_user")
+    sessionStorage.removeItem("swm_session_user")
     throw new ApiError("Session expired. Please sign in again.", 401)
   }
 
@@ -213,7 +215,7 @@ export async function logout(): Promise<void> {
   }
   localStorage.removeItem(TOKEN_KEY)
   localStorage.removeItem(REFRESH_TOKEN_KEY)
-  localStorage.removeItem("swm_user")
+  sessionStorage.removeItem("swm_session_user")
 }
 
 // ─── Bins ─────────────────────────────────────────────────────────────────────

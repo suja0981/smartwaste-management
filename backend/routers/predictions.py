@@ -272,21 +272,29 @@ def seed_ml_from_db(db: Session = Depends(get_db)):
 
 
 @router.post("/train")
-async def train_models(background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+async def train_models(background_tasks: BackgroundTasks):
     """
     Trigger model training on historical data.
     Runs in background — prefer /seed for synchronous use (e.g. tests).
     """
     def train():
-        bins = db.query(BinDB).all()
-        for bin_db in bins:
-            telemetry = {
-                "fill_level_percent": bin_db.fill_level_percent,
-                "battery_percent": bin_db.battery_percent,
-                "temperature_c": bin_db.temperature_c,
-                "humidity_percent": bin_db.humidity_percent,
-            }
-            prediction_service.ingest_telemetry(bin_db.id, telemetry)
+        # Bug fix: background tasks must open their own DB session.
+        # The request-scoped session from Depends(get_db) is closed before
+        # the background task executes, causing 'Session already closed' errors.
+        from database import SessionLocal
+        db = SessionLocal()
+        try:
+            bins = db.query(BinDB).all()
+            for bin_db in bins:
+                telemetry = {
+                    "fill_level_percent": bin_db.fill_level_percent,
+                    "battery_percent": bin_db.battery_percent,
+                    "temperature_c": bin_db.temperature_c,
+                    "humidity_percent": bin_db.humidity_percent,
+                }
+                prediction_service.ingest_telemetry(bin_db.id, telemetry)
+        finally:
+            db.close()
 
     background_tasks.add_task(train)
     return {"status": "training_started", "message": "Model training initiated in background"}

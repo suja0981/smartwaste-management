@@ -21,7 +21,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func
 
 from database import get_db, BinDB, RouteHistoryDB, TaskDB, CrewDB
-from auth_utils import require_admin
+from auth_utils import get_current_user, require_admin
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -312,10 +312,11 @@ def export_report(
 def get_summary(
     days: int = Query(30, ge=1, le=365),
     db: Session = Depends(get_db),
+    _user=Depends(get_current_user),
 ):
     """
     JSON summary for dashboards or custom rendering.
-    No admin required — read-only KPIs.
+    Requires authentication — read-only KPIs.
     GET /reports/summary?days=7
     """
     data = _gather_report_data(db, days=days)

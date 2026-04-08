@@ -11,7 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useToast } from "@/hooks/use-toast"
 import { useAuth } from "@/contexts/auth-context"
 import { assignBinZone, getBins, type Bin } from "@/lib/api-client"
-import { mergeRealtimeBinUpdates, useRealtimeBins } from "@/hooks/useRealtimeBins"
+import { mergeRealtimeBinUpdates, useRealtimeBinsContext } from "@/hooks/useRealtimeBins"
 import { mapBinStatus, getStatusColor, getStatusText, formatTimestamp } from "@/lib/status-mapper"
 import { buildZoneOptions, getZoneLabel, UNASSIGNED_ZONE } from "@/lib/zone-utils"
 import {
@@ -40,8 +40,8 @@ export function BinManagementIntegrated() {
   const [updatingZoneId, setUpdatingZoneId] = useState<string | null>(null)
   const seenAlerts = useRef<Set<string>>(new Set())
   const { toast } = useToast()
-  const { token, isAdmin } = useAuth()
-  const { binUpdates, connected, alertQueue, dismissAlert } = useRealtimeBins(token, !!token)
+  const { isAdmin } = useAuth()
+  const { binUpdates, connected, alertQueue, dismissAlert } = useRealtimeBinsContext()
 
   // ── TanStack Query: handles fetch, polling, loading & error state ──────────
   const queryZone = zoneFilter === "all" ? undefined : zoneFilter
@@ -55,15 +55,12 @@ export function BinManagementIntegrated() {
   // ── Display bins: fresh API data merged with live WebSocket updates ─────────
   const [displayBins, setDisplayBins] = useState<Bin[]>(fetchedBins)
 
-  // Sync when the query returns fresh data
+  // Single effect: always derive from the authoritative fetchedBins, then apply
+  // any realtime deltas on top. Two separate effects had a write-order race
+  // where a fetchedBins update would overwrite binUpdates-merged state.
   useEffect(() => {
-    setDisplayBins(fetchedBins)
-  }, [fetchedBins])
-
-  // Merge incremental realtime updates on top
-  useEffect(() => {
-    setDisplayBins((current) => mergeRealtimeBinUpdates(current, binUpdates))
-  }, [binUpdates])
+    setDisplayBins(mergeRealtimeBinUpdates(fetchedBins, binUpdates))
+  }, [fetchedBins, binUpdates])
 
   useEffect(() => {
     const nextAlert = alertQueue[0]

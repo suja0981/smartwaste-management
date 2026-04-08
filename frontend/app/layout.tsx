@@ -8,6 +8,7 @@ import { AuthProvider } from "@/contexts/auth-context"
 import { QueryProvider } from "@/components/query-provider"
 import { Toaster } from "@/components/ui/toaster"
 import { Suspense } from "react"
+import { RealtimeBinsProvider } from "@/hooks/useRealtimeBins"
 import "./globals.css"
 // Leaflet CSS moved to app/map/page.tsx — only loaded on the map page
 
@@ -29,10 +30,12 @@ export default function RootLayout({
         <AuthProvider>
         <QueryProvider>
           <ThemeProvider>
-              <Suspense fallback={<div className="flex h-screen items-center justify-center"><div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" /></div>}>
-                {children}
+              <RealtimeBinsProvider>
+                <Suspense fallback={<div className="flex h-screen items-center justify-center"><div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" /></div>}>
+                  {children}
+                </Suspense>
                 <Toaster />
-              </Suspense>
+              </RealtimeBinsProvider>
             </ThemeProvider>
         </QueryProvider>
         </AuthProvider>

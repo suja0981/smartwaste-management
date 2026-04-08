@@ -12,29 +12,30 @@ type Props = {
     onSuccess: () => void
 }
 
+const EMPTY_FORM = {
+    id: "",
+    location: "",
+    capacity_liters: "",
+    fill_level_percent: "0",
+    latitude: "",
+    longitude: "",
+}
+
 export function AddBinDialog({ onSuccess }: Props) {
     const { toast } = useToast()
     const [open, setOpen] = useState(false)
     const [loading, setLoading] = useState(false)
 
-    const emptyForm = {
-        id: "",
-        location: "",
-        capacity_liters: "",
-        fill_level_percent: "0",
-        latitude: "",
-        longitude: "",
-    }
-    const [form, setForm] = useState(emptyForm)
-    const [errors, setErrors] = useState<Partial<typeof emptyForm>>({})
+    const [form, setForm] = useState(EMPTY_FORM)
+    const [errors, setErrors] = useState<Partial<typeof EMPTY_FORM>>({})
 
-    const set = (field: keyof typeof emptyForm) => (e: React.ChangeEvent<HTMLInputElement>) => {
+    const set = (field: keyof typeof EMPTY_FORM) => (e: React.ChangeEvent<HTMLInputElement>) => {
         setForm((f) => ({ ...f, [field]: e.target.value }))
         setErrors((err) => ({ ...err, [field]: undefined }))
     }
 
     const validate = () => {
-        const next: Partial<typeof emptyForm> = {}
+        const next: Partial<typeof EMPTY_FORM> = {}
         if (!form.id.trim()) next.id = "Bin ID is required"
         if (!form.location.trim()) next.location = "Location is required"
         if (!form.capacity_liters || Number(form.capacity_liters) < 1)
@@ -76,7 +77,7 @@ export function AddBinDialog({ onSuccess }: Props) {
             })
 
             setOpen(false)
-            setForm(emptyForm)
+            setForm(EMPTY_FORM)
             setErrors({})
             onSuccess()
         } catch (e) {
@@ -92,7 +93,7 @@ export function AddBinDialog({ onSuccess }: Props) {
 
     const handleClose = () => {
         setOpen(false)
-        setForm(emptyForm)
+        setForm(EMPTY_FORM)
         setErrors({})
     }
 

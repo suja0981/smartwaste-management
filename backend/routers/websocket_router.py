@@ -32,10 +32,11 @@ Message format sent to clients:
 """
 
 import asyncio
+import json
 import logging
 from typing import Dict, List, Optional
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query, status
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, status
 from jose import JWTError, jwt
 from sqlalchemy.orm import Session
 
@@ -146,21 +147,13 @@ manager = ConnectionManager()
 
 # ─── Auth helper ─────────────────────────────────────────────────────────────
 
-def _verify_token_from_query(token: Optional[str]) -> Optional[str]:
-    """
-    Validates a JWT passed as ?token=... query param.
-    Returns the user email on success, None on failure.
-    WebSocket upgrade happens before HTTP headers are easy to read, so
-    passing the JWT as a query param is the standard pattern.
-    """
-    if not token:
-        return None
+def _verify_ws_token(token: str) -> Optional[str]:
+    """Validate a WebSocket JWT; return the user email on success, None on failure."""
     try:
         payload = jwt.decode(token, settings.secret_key, algorithms=[settings.algorithm])
         email: str = payload.get("sub")
         if not email:
             return None
-        # Only access tokens are valid
         if payload.get("type", "access") != "access":
             return None
         return email
@@ -171,30 +164,47 @@ def _verify_token_from_query(token: Optional[str]) -> Optional[str]:
 # ─── WebSocket endpoint ───────────────────────────────────────────────────────
 
 @router.websocket("/ws")
-async def websocket_endpoint(
-    websocket: WebSocket,
-    token: Optional[str] = Query(default=None),
-):
+async def websocket_endpoint(websocket: WebSocket):
     """
     WebSocket endpoint for real-time dashboard updates.
 
-    Connect with:
-      ws://localhost:8000/ws?token=<access_jwt>
+    Security: the JWT is NEVER sent as a URL query parameter — URLs are
+    logged in plaintext by every proxy and access log.  Instead the client
+    sends the token as the first message after the connection is accepted:
+      1. Connect to ws://host/ws  (no query params)
+      2. Send: {"type": "auth", "token": "<access_jwt>"}
+      3. Receive {"event": "connected", ...} on success, or
+               {"event": "auth_error", "reason": "..."} then connection closes.
 
     The client should handle reconnection with exponential back-off.
     """
-    email = _verify_token_from_query(token)
+    # Accept the upgrade first so we can exchange messages for authentication.
+    await websocket.accept()
 
-    if not email:
-        # Must close BEFORE accepting to reject at the upgrade level
+    # Wait up to 10 s for the auth message to prevent dangling connections.
+    try:
+        raw = await asyncio.wait_for(websocket.receive_text(), timeout=10.0)
+        msg = json.loads(raw)
+        if msg.get("type") != "auth":
+            raise ValueError("First message must have type='auth'")
+        token = msg.get("token", "")
+    except (asyncio.TimeoutError, ValueError, json.JSONDecodeError):
+        await websocket.send_json({"event": "auth_error", "reason": "Authentication required"})
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return
 
-    # Verify user still exists in DB
+    email = _verify_ws_token(token)
+    if not email:
+        await websocket.send_json({"event": "auth_error", "reason": "Invalid or expired token"})
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        return
+
+    # Verify user still exists and is active in DB.
     db: Session = SessionLocal()
     try:
         user = db.query(UserDB).filter(UserDB.email == email, UserDB.is_active == True).first()
         if not user:
+            await websocket.send_json({"event": "auth_error", "reason": "User not found or disabled"})
             await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
             return
     finally:
@@ -202,17 +212,14 @@ async def websocket_endpoint(
 
     await manager.connect(websocket, email)
 
-    # Send current connection count as a welcome message
     try:
         await websocket.send_json({
             "event": "connected",
-            "message": f"Connected to Smart Waste real-time feed",
+            "message": "Connected to Smart Waste real-time feed",
             "active_connections": manager.connection_count,
         })
 
-        # Keep connection alive; client will disconnect when done
         while True:
-            # Wait for a ping from the client (or disconnect)
             data = await websocket.receive_text()
             if data == "ping":
                 await websocket.send_json({"event": "pong"})

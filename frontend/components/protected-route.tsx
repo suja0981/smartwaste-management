@@ -1,18 +1,5 @@
 'use client'
 
-/**
- * components/protected-route.tsx
- *
- * Fixes:
- * 1. ProtectedRoute — only show children once both `!isLoading` AND
- *    `isAuthenticated` are true. Previous code had a window where
- *    isAuthenticated was false briefly after isLoading resolved.
- * 2. AdminOnlyRoute — same fix applied.
- * 3. FullScreenLoader now has a stable layout (no shift between spinner sizes).
- * 4. redirecting state prevents the "flash of unauthenticated content" between
- *    when isLoading finishes and router.replace() completes.
- */
-
 import { type ReactNode, useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useAuth } from '@/contexts/auth-context'

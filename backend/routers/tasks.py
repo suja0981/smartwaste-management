@@ -11,6 +11,7 @@ from typing import List, Optional
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Depends, Query
 from sqlalchemy.orm import Session
 
+from auth_utils import require_admin
 from database import get_db, TaskDB, CrewDB, BinDB
 from models import Task, CreateTaskRequest, UpdateTaskRequest, AssignTaskRequest
 from utils import get_current_timestamp
@@ -105,7 +106,7 @@ def get_task(task_id: str, db: Session = Depends(get_db)):
 
 
 @router.patch("/{task_id}", response_model=Task)
-def update_task(task_id: str, req: UpdateTaskRequest, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+def update_task(task_id: str, req: UpdateTaskRequest, background_tasks: BackgroundTasks, db: Session = Depends(get_db), _admin=Depends(require_admin)):
     task_db = db.query(TaskDB).filter(TaskDB.id == task_id).first()
     if not task_db:
         raise HTTPException(status_code=404, detail="Task not found")
@@ -143,7 +144,7 @@ def update_task(task_id: str, req: UpdateTaskRequest, background_tasks: Backgrou
 
 
 @router.post("/{task_id}/assign", response_model=Task)
-def assign_task(task_id: str, req: AssignTaskRequest, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+def assign_task(task_id: str, req: AssignTaskRequest, background_tasks: BackgroundTasks, db: Session = Depends(get_db), _admin=Depends(require_admin)):
     """Assign a task to a crew, auto-start the task and notify the crew (Phase 3)."""
     task_db = db.query(TaskDB).filter(TaskDB.id == task_id).first()
     if not task_db:
@@ -169,7 +170,7 @@ def assign_task(task_id: str, req: AssignTaskRequest, background_tasks: Backgrou
 
 
 @router.delete("/{task_id}", status_code=204)
-def delete_task(task_id: str, db: Session = Depends(get_db)):
+def delete_task(task_id: str, db: Session = Depends(get_db), _admin=Depends(require_admin)):
     task_db = db.query(TaskDB).filter(TaskDB.id == task_id).first()
     if not task_db:
         raise HTTPException(status_code=404, detail="Task not found")

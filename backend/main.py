@@ -1,15 +1,3 @@
-"""
-main.py — Smart Waste Management API entry point.
-
-Phase changes:
-  Phase 3: Added WebSocket router (/ws), FCM device-token endpoint.
-  Phase 5: Added reports router (/reports).
-  Phase 6: Zone filtering is handled inside individual routers via query params.
-
-Startup event:
-  Warms up the ML models from the TelemetryDB table so predictions are
-  available immediately after deploy, not just after the next sensor cycle.
-"""
 
 import logging
 from contextlib import asynccontextmanager
@@ -35,16 +23,6 @@ Base.metadata.create_all(bind=engine)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """
-    Replaces the deprecated @app.on_event("startup") / ("shutdown") pattern.
-
-    On startup:
-      1. Warm up ML models from persisted telemetry so predictions work
-         immediately after a restart instead of waiting for the next IoT cycle.
-      2. Prune expired rows from the token blacklist table. Without cleanup
-         the table grows forever — expired tokens fail JWT validation anyway,
-         so there is no security benefit in keeping them.
-    """
     db = SessionLocal()
     try:
         # ── Prediction service warm-up ────────────────────────────────────

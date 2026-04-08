@@ -1,11 +1,3 @@
-"""
-database.py
-
-Changes from original:
-- Removed the empty # AI Alerts placeholder (no CCTV in this project)
-- Added DeviceTokenDB for Phase 3 Firebase Cloud Messaging push notifications
-- PostgreSQL only; SQLite removed
-"""
 
 from sqlalchemy import (
     create_engine, Column, Integer, String, Float, DateTime,

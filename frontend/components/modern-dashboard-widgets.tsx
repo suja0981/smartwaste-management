@@ -15,9 +15,8 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Progress } from "@/components/ui/progress"
 import { useToast } from "@/hooks/use-toast"
-import { useAuth } from "@/contexts/auth-context"
 import { getBins, type Bin } from "@/lib/api-client"
-import { mergeRealtimeBinUpdates, useRealtimeBins } from "@/hooks/useRealtimeBins"
+import { mergeRealtimeBinUpdates, useRealtimeBinsContext } from "@/hooks/useRealtimeBins"
 import { mapBinStatus, getStatusColor, getStatusText, formatTimestamp } from "@/lib/status-mapper"
 import { Trash2, AlertTriangle, Activity, MapPin, Loader2, Shield } from "lucide-react"
 import { cn } from "@/lib/utils"
@@ -41,8 +40,7 @@ const BinDataContext = createContext<BinDataCtx>({
 export function BinDataProvider({ children }: { children: ReactNode }) {
   const seenAlerts = useRef<Set<string>>(new Set())
   const { toast } = useToast()
-  const { token } = useAuth()
-  const { binUpdates, connected, alertQueue, dismissAlert } = useRealtimeBins(token, !!token)
+  const { binUpdates, connected, alertQueue, dismissAlert } = useRealtimeBinsContext()
 
   const { data: fetchedBins = [], isLoading: initialLoading, refetch } = useQuery({
     queryKey: ["bins"],
@@ -53,13 +51,11 @@ export function BinDataProvider({ children }: { children: ReactNode }) {
 
   const [displayBins, setDisplayBins] = useState<Bin[]>(fetchedBins)
 
+  // Single effect: always derive from the authoritative fetchedBins, then apply
+  // any realtime deltas on top. Two separate effects had a write-order race.
   useEffect(() => {
-    setDisplayBins(fetchedBins)
-  }, [fetchedBins])
-
-  useEffect(() => {
-    setDisplayBins((current) => mergeRealtimeBinUpdates(current, binUpdates))
-  }, [binUpdates])
+    setDisplayBins(mergeRealtimeBinUpdates(fetchedBins, binUpdates))
+  }, [fetchedBins, binUpdates])
 
   useEffect(() => {
     const nextAlert = alertQueue[0]

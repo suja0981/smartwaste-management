@@ -8,6 +8,7 @@ from jose import JWTError, jwt
 from passlib.context import CryptContext
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
 
 from api_key_services import generate_api_key, revoke_api_key, verify_api_key
 from config import get_settings
@@ -115,6 +116,11 @@ def _is_token_revoked(token_jti: str, db: Session) -> bool:
 
 
 def _revoke_token(token_jti: str, email: str, expires_at: datetime, db: Session) -> None:
+    # Lazily prune expired entries on every revocation to prevent unbounded
+    # table growth. The indexed expires_at column makes this a fast range scan.
+    db.query(TokenBlacklistDB).filter(
+        TokenBlacklistDB.expires_at < _now()
+    ).delete(synchronize_session=False)
     db.add(
         TokenBlacklistDB(
             token_jti=token_jti,
@@ -190,19 +196,31 @@ def _upsert_firebase_user(decoded_token: dict, db: Session) -> UserDB:
             user.auth_provider = provider
 
     if not user:
-        user = UserDB(
-            email=email,
-            full_name=full_name,
-            hashed_password=None,
-            role="user",
-            is_active=True,
-            created_at=_now(),
-            firebase_uid=firebase_uid,
-            auth_provider=provider,
-        )
-        db.add(user)
-
-    db.commit()
+        try:
+            user = UserDB(
+                email=email,
+                full_name=full_name,
+                hashed_password=None,
+                role="user",
+                is_active=True,
+                created_at=_now(),
+                firebase_uid=firebase_uid,
+                auth_provider=provider,
+            )
+            db.add(user)
+            db.commit()
+        except IntegrityError:
+            # A concurrent Firebase login inserted the same user between our
+            # read and write (TOCTOU race). Roll back and re-read from DB.
+            db.rollback()
+            user = (
+                db.query(UserDB).filter(UserDB.firebase_uid == firebase_uid).first()
+                or db.query(UserDB).filter(UserDB.email == email).first()
+            )
+            if not user:
+                raise HTTPException(status_code=500, detail="Failed to create user account")
+    else:
+        db.commit()
     db.refresh(user)
     _get_or_create_settings(user.id, db)
     return user
@@ -424,6 +442,7 @@ def refresh_token(body: TokenRefreshRequest, db: Session = Depends(get_db)):
         role = payload.get("role")
         token_type = payload.get("type")
         jti = payload.get("jti")
+        exp = payload.get("exp")
 
         if token_type != "refresh":
             raise ValueError("Not a refresh token")
@@ -438,10 +457,16 @@ def refresh_token(body: TokenRefreshRequest, db: Session = Depends(get_db)):
     if not user or not user.is_active:
         raise HTTPException(status_code=401, detail="User not found or disabled")
 
+    # Rotate: revoke the consumed refresh token and issue a fresh one.
+    # A stolen refresh token can therefore only be exchanged once.
+    if jti:
+        exp_dt = datetime.fromtimestamp(exp, tz=timezone.utc) if exp else None
+        _revoke_token(jti, email, exp_dt, db)
+
     _get_or_create_settings(user.id, db)
     return TokenResponse(
         access_token=_create_jwt(email, role, "access"),
-        refresh_token=body.refresh_token,
+        refresh_token=_create_jwt(email, role, "refresh"),
         user=_user_to_response(user),
         expires_in=ACCESS_TOKEN_EXPIRE_MINUTES * 60,
     )

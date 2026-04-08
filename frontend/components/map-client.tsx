@@ -12,9 +12,8 @@ import { Switch } from "@/components/ui/switch"
 import { Label } from "@/components/ui/label"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useToast } from "@/hooks/use-toast"
-import { useAuth } from "@/contexts/auth-context"
 import { getBins, getCrews, getRoutes, type Bin, type Crew, type Route } from "@/lib/api-client"
-import { mergeRealtimeBinUpdates, useRealtimeBins } from "@/hooks/useRealtimeBins"
+import { mergeRealtimeBinUpdates, useRealtimeBinsContext } from "@/hooks/useRealtimeBins"
 import { mapBinStatus } from "@/lib/status-mapper"
 import { Trash2, Users, Route as RouteIcon, RefreshCw, Loader2, MapPin } from "lucide-react"
 import { cn } from "@/lib/utils"
@@ -95,9 +94,8 @@ export function MapClient() {
   const routeLines = useRef<L.Polyline[]>([])
 
   const { toast } = useToast()
-  const { token } = useAuth()
   const { resolvedTheme } = useTheme()
-  const { binUpdates, connected, alertQueue, dismissAlert } = useRealtimeBins(token, !!token)
+  const { binUpdates, connected, alertQueue, dismissAlert } = useRealtimeBinsContext()
   const isDark = resolvedTheme === "dark"
   const queryClient = useQueryClient()
 
@@ -129,13 +127,11 @@ export function MapClient() {
   // ── Merge realtime WS updates on top of queried bins ──────────────────────
   const [displayBins, setDisplayBins] = useState<Bin[]>(fetchedBins)
 
+  // Single effect: always derive from the authoritative fetchedBins, then apply
+  // any realtime deltas on top. Two separate effects had a write-order race.
   useEffect(() => {
-    setDisplayBins(fetchedBins)
-  }, [fetchedBins])
-
-  useEffect(() => {
-    setDisplayBins((current) => mergeRealtimeBinUpdates(current, binUpdates))
-  }, [binUpdates])
+    setDisplayBins(mergeRealtimeBinUpdates(fetchedBins, binUpdates))
+  }, [fetchedBins, binUpdates])
 
   useEffect(() => {
     const nextAlert = alertQueue[0]
@@ -173,7 +169,7 @@ export function MapClient() {
   }, [crews, selected])
 
   useEffect(() => {
-    if (loading || !divRef.current || mapRef.current) return
+    if (!divRef.current || mapRef.current) return
 
     const map = L.map(divRef.current, {
       center: [DEFAULT_LAT, DEFAULT_LNG],
@@ -195,7 +191,7 @@ export function MapClient() {
       cm.clear()
       routeLines.current = []
     }
-  }, [loading])
+  }, []) // Run once on mount — prevents double-init and map teardown on refetch
 
   useEffect(() => {
     const map = mapRef.current

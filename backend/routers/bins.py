@@ -1,9 +1,3 @@
-"""
-routers/bins.py
-
-Phase 6: Added optional `zone_id` query param to list_bins and zone assignment endpoint.
-         Kept all original endpoints unchanged for backward compatibility.
-"""
 
 from typing import List, Optional
 

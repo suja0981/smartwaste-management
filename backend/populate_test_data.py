@@ -20,7 +20,7 @@ import os
 import requests
 import random
 
-API_BASE = "http://localhost:8000"
+API_BASE = "https://smartwaste-management.onrender.com"
 
 # Auth for telemetry (requires X-API-Key or Bearer token)
 _API_KEY = os.getenv("IOT_API_KEY", "")

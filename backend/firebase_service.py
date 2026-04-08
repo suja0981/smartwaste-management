@@ -13,17 +13,18 @@ from typing import Optional
 logger = logging.getLogger(__name__)
 
 _firebase_app = None
-_init_attempted = False
 
 
 def _init_firebase():
-    global _firebase_app, _init_attempted
+    global _firebase_app
 
-    if _init_attempted:
+    # Return cached app if already successfully initialized.
+    if _firebase_app is not None:
         return _firebase_app
 
-    _init_attempted = True
-
+    # Otherwise try to initialize (retries on every call until it succeeds,
+    # so a transient startup failure — e.g. .env loaded after first request —
+    # doesn't permanently disable Firebase for the lifetime of the process).
     try:
         import firebase_admin
         from firebase_admin import credentials

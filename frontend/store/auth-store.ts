@@ -22,11 +22,11 @@ import {
   signInWithEmail,
   registerWithEmail,
   getFirebaseIdToken,
+  updateFirebaseProfile,
 } from "@/lib/firebase"
 import {
   login as apiLogin,
   loginWithFirebase as apiLoginWithFirebase,
-  signup as apiSignup,
   logout as apiLogout,
   unregisterDeviceToken,
 } from "@/lib/api-client"
@@ -41,6 +41,7 @@ export interface AuthUser {
   full_name: string
   role: "admin" | "user"
   token: string
+  auth_provider: "firebase" | "local"
 }
 
 function getCachedUser(): AuthUser | null {
@@ -87,13 +88,19 @@ interface AuthState {
 export const useAuthStore = create<AuthState>((set, get) => ({
   user: getCachedUser(),
   isLoading: true,
-  get isAuthenticated() { return get().user !== null },
-  get isAdmin() { return get().user?.role === "admin" },
-  get token() { return get().user?.token ?? null },
+  isAuthenticated: getCachedUser() !== null,
+  isAdmin: getCachedUser()?.role === "admin",
+  token: getCachedUser()?.token ?? null,
 
   _setUser: (user) => {
     cacheUser(user)
-    set({ user, isLoading: false })
+    set({
+      user,
+      isLoading: false,
+      isAuthenticated: user !== null,
+      isAdmin: user?.role === "admin",
+      token: user?.token ?? null,
+    })
   },
 
   _setLoading: (isLoading) => set({ isLoading }),
@@ -116,6 +123,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       full_name: resp.user.full_name,
       role: resp.user.role as "admin" | "user",
       token: resp.access_token,
+      auth_provider: "local",
     }
     if (resp.refresh_token) localStorage.setItem(REFRESH_KEY, resp.refresh_token)
     localStorage.setItem(TOKEN_KEY, resp.access_token)
@@ -126,8 +134,25 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     return get().login(email, password)
   },
 
+  // loginWithEmail: Firebase email+password → exchange ID token for backend JWT.
+  // This is the primary sign-in path for users created via register().
   loginWithEmail: async (email, password) => {
-    return get().login(email, password)
+    const { clearAll } = _clearSession()
+    clearAll()
+    const fbCred = await signInWithEmail(email, password)
+    const idToken = await getFirebaseIdToken(fbCred.user)
+    const resp = await apiLoginWithFirebase(idToken)
+    const user: AuthUser = {
+      uid: fbCred.user.uid,
+      email: fbCred.user.email ?? resp.user.email,
+      full_name: resp.user.full_name,
+      role: resp.user.role as "admin" | "user",
+      token: resp.access_token,
+      auth_provider: "firebase",
+    }
+    if (resp.refresh_token) localStorage.setItem(REFRESH_KEY, resp.refresh_token)
+    localStorage.setItem(TOKEN_KEY, resp.access_token)
+    get()._setUser(user)
   },
 
   loginWithGoogle: async () => {
@@ -142,6 +167,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       full_name: resp.user.full_name,
       role: resp.user.role as "admin" | "user",
       token: resp.access_token,
+      auth_provider: "firebase",
     }
     if (resp.refresh_token) localStorage.setItem(REFRESH_KEY, resp.refresh_token)
     localStorage.setItem(TOKEN_KEY, resp.access_token)
@@ -151,16 +177,17 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   register: async (email, password, fullName) => {
     const { clearAll } = _clearSession()
     clearAll()
-    await registerWithEmail(email, password)
-    const fbCred = await signInWithEmail(email, password)
-    const idToken = await getFirebaseIdToken(fbCred.user)
-    const resp = await apiSignup({ email, password, full_name: fullName })
+    const fbCred = await registerWithEmail(email, password)
+    await updateFirebaseProfile(fbCred.user, fullName)
+    const idToken = await getFirebaseIdToken(fbCred.user, true)
+    const resp = await apiLoginWithFirebase(idToken)
     const user: AuthUser = {
-      uid: String(resp.user.id ?? ""),
-      email: resp.user.email,
+      uid: fbCred.user.uid,
+      email: fbCred.user.email ?? resp.user.email,
       full_name: resp.user.full_name,
       role: resp.user.role as "admin" | "user",
       token: resp.access_token,
+      auth_provider: "firebase",
     }
     if (resp.refresh_token) localStorage.setItem(REFRESH_KEY, resp.refresh_token)
     localStorage.setItem(TOKEN_KEY, resp.access_token)
@@ -201,18 +228,43 @@ function _clearSession() {
  * Call this from a top-level client component (e.g. AuthProvider or layout).
  */
 export function initAuthListener() {
-  const store = useAuthStore.getState()
-  store._setLoading(true)
+  useAuthStore.getState()._setLoading(true)
 
   const unsub = onAuthStateChanged(async (fbUser) => {
+    const store = useAuthStore.getState()
     if (!fbUser) {
-      // Firebase has no session — keep backend session if present
-      store._setLoading(false)
+      // Firebase has no session. If the current user authenticated via Firebase
+      // (e.g. token revoked in Firebase Console or signed out on another device),
+      // clear frontend state so protected routes redirect to login.
+      // Local-login users have no Firebase session by design — leave them untouched.
+      if (store.user?.auth_provider === "firebase") {
+        _clearSession().clearAll()
+        store._setUser(null)
+      } else {
+        store._setLoading(false)
+      }
       return
     }
-    // Firebase session active — ensure our store user is in sync
+    // Firebase session active — re-authenticate with backend if store has no user
     if (!store.user) {
-      store._setLoading(false)
+      try {
+        const idToken = await getFirebaseIdToken(fbUser)
+        const resp = await apiLoginWithFirebase(idToken)
+        const user: AuthUser = {
+          uid: fbUser.uid,
+          email: fbUser.email ?? resp.user.email,
+          full_name: resp.user.full_name,
+          role: resp.user.role as "admin" | "user",
+          token: resp.access_token,
+          auth_provider: "firebase",
+        }
+        if (resp.refresh_token) localStorage.setItem(REFRESH_KEY, resp.refresh_token)
+        localStorage.setItem(TOKEN_KEY, resp.access_token)
+        store._setUser(user)
+      } catch {
+        // Firebase session present but backend re-auth failed — clear loading
+        store._setLoading(false)
+      }
     } else {
       store._setLoading(false)
     }

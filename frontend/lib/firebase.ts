@@ -63,6 +63,11 @@ export async function getFirebaseIdToken(user: User, forceRefresh = true): Promi
   return user.getIdToken(forceRefresh)
 }
 
+export async function updateFirebaseProfile(user: User, displayName: string): Promise<void> {
+  const { updateProfile } = await import("firebase/auth")
+  return updateProfile(user, { displayName })
+}
+
 export function onAuthStateChanged(callback: (user: User | null) => void): () => void {
   const { onAuthStateChanged: listen } = require("firebase/auth")
   return listen(getFirebaseAuth(), callback)
