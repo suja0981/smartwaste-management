@@ -16,13 +16,23 @@ settings = get_settings()
 settings.validate_production_secrets()
 
 # ── Create all DB tables (idempotent) ─────────────────────────────────────────
-Base.metadata.create_all(bind=engine)
 
 
 # ── Lifespan: startup + shutdown ──────────────────────────────────────────────
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Keep DB initialization out of import-time side effects so tests can import
+    # `main.app` without requiring a running database.
+    if settings.environment.lower() == "test":
+        yield  # application runs here
+        return
+
+    try:
+        Base.metadata.create_all(bind=engine)
+    except Exception as e:
+        logger.warning(f"[startup] DB init failed (non-fatal): {e}")
+
     db = SessionLocal()
     try:
         # ── Prediction service warm-up ────────────────────────────────────

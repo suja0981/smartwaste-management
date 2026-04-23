@@ -1,5 +1,5 @@
 // jest.setup.js
-import '@testing-library/jest-dom'
+require('@testing-library/jest-dom')
 
 // Mock next/navigation
 jest.mock('next/navigation', () => ({

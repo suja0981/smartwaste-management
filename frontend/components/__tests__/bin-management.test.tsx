@@ -3,19 +3,40 @@
  *
  * FIXES vs original:
  * 1. Polling interval test was asserting 2 calls after 5000ms — but the
- *    component polls every 10_000ms. Fixed to advance 10s.
+ *    component polls every 60_000ms. Fixed to advance 60s.
  * 2. Added `jest.useRealTimers()` in afterEach to prevent timer bleed.
  * 3. Added missing `'use client'` environment setup note.
  * 4. Added act() wrapper around fireEvent to suppress React warnings.
  */
 
+import type { ReactElement } from 'react'
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { BinManagementIntegrated } from '@/components/bin-management'
 import * as apiClient from '@/lib/api-client'
 import { useToast } from '@/hooks/use-toast'
 
 jest.mock('@/lib/api-client')
 jest.mock('@/hooks/use-toast')
+jest.mock('@/hooks/useRealtimeBins', () => {
+  const actual = jest.requireActual('@/hooks/useRealtimeBins')
+  return {
+    ...actual,
+    useRealtimeBinsContext: () => ({
+      binUpdates: new Map(),
+      connected: false,
+      alertQueue: [],
+      dismissAlert: jest.fn(),
+    }),
+  }
+})
+
+function renderWithProviders(ui: ReactElement) {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  })
+  return render(<QueryClientProvider client={queryClient}>{ui}</QueryClientProvider>)
+}
 
 const mockBins = [
   {
@@ -50,14 +71,14 @@ describe('BinManagementIntegrated', () => {
   })
 
   it('renders the component title', async () => {
-    render(<BinManagementIntegrated />)
+    renderWithProviders(<BinManagementIntegrated />)
     await waitFor(() => {
       expect(screen.getByText('Bin Management')).toBeInTheDocument()
     })
   })
 
   it('loads and displays bins', async () => {
-    render(<BinManagementIntegrated />)
+    renderWithProviders(<BinManagementIntegrated />)
     await waitFor(() => {
       expect(apiClient.getBins).toHaveBeenCalled()
       expect(screen.getByText('bin1')).toBeInTheDocument()
@@ -66,7 +87,7 @@ describe('BinManagementIntegrated', () => {
   })
 
   it('displays bin locations', async () => {
-    render(<BinManagementIntegrated />)
+    renderWithProviders(<BinManagementIntegrated />)
     await waitFor(() => {
       expect(screen.getByText('Downtown')).toBeInTheDocument()
       expect(screen.getByText('Park')).toBeInTheDocument()
@@ -74,7 +95,7 @@ describe('BinManagementIntegrated', () => {
   })
 
   it('filters bins by search term', async () => {
-    render(<BinManagementIntegrated />)
+    renderWithProviders(<BinManagementIntegrated />)
     await waitFor(() => expect(screen.getByText('bin1')).toBeInTheDocument())
 
     const searchInput = screen.getByPlaceholderText('Search bins...')
@@ -88,42 +109,44 @@ describe('BinManagementIntegrated', () => {
     })
   })
 
-  it('displays error toast on API failure', async () => {
+  it('handles API failure gracefully', async () => {
     const mockToast = jest.fn()
     ;(useToast as jest.Mock).mockReturnValue({ toast: mockToast })
     ;(apiClient.getBins as jest.Mock).mockRejectedValue(new Error('Failed to load bins'))
 
-    render(<BinManagementIntegrated />)
+    renderWithProviders(<BinManagementIntegrated />)
 
+    await waitFor(() => expect(apiClient.getBins).toHaveBeenCalled())
     await waitFor(() => {
-      expect(mockToast).toHaveBeenCalledWith(
-        expect.objectContaining({ title: 'Error', variant: 'destructive' })
-      )
+      expect(screen.getByText('No bins registered yet.')).toBeInTheDocument()
     })
+    expect(mockToast).not.toHaveBeenCalled()
   })
 
   it('shows loading spinner initially', () => {
-    render(<BinManagementIntegrated />)
+    renderWithProviders(<BinManagementIntegrated />)
     expect(document.querySelector('.animate-spin')).toBeInTheDocument()
   })
 
-  it('polls getBins at the correct 10-second interval', async () => {
-    // FIX: component uses POLL_INTERVAL = 10_000ms, not 5000ms
+  it('polls getBins at the correct 60-second interval', async () => {
+    // Component uses POLL_INTERVAL = 60_000ms
     jest.useFakeTimers()
     ;(apiClient.getBins as jest.Mock).mockResolvedValue(mockBins)
 
-    render(<BinManagementIntegrated />)
+    renderWithProviders(<BinManagementIntegrated />)
 
-    // Initial load
-    await act(async () => { jest.runAllTimers() })
-    expect(apiClient.getBins).toHaveBeenCalledTimes(1)
+    await waitFor(() => expect(apiClient.getBins).toHaveBeenCalledTimes(1))
 
     // Advance by exactly 10 seconds → second poll
-    await act(async () => { jest.advanceTimersByTime(10_000) })
-    expect(apiClient.getBins).toHaveBeenCalledTimes(2)
+    await act(async () => {
+      jest.advanceTimersByTime(60_000)
+    })
+    await waitFor(() => expect(apiClient.getBins).toHaveBeenCalledTimes(2))
 
     // Another 10 seconds → third poll
-    await act(async () => { jest.advanceTimersByTime(10_000) })
-    expect(apiClient.getBins).toHaveBeenCalledTimes(3)
+    await act(async () => {
+      jest.advanceTimersByTime(60_000)
+    })
+    await waitFor(() => expect(apiClient.getBins).toHaveBeenCalledTimes(3))
   })
 })

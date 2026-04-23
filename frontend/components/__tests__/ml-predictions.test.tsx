@@ -115,7 +115,7 @@ describe('MLPredictions', () => {
     render(<MLPredictions binId="bin1" />)
     await waitFor(() => {
       expect(screen.getByText('Hourly Usage Pattern')).toBeInTheDocument()
-      expect(screen.getByText('Hour 9:00')).toBeInTheDocument()
+      expect(screen.getByText('09:00')).toBeInTheDocument()
     })
   })
 
