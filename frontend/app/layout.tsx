@@ -17,6 +17,16 @@ import "./globals.css"
 export const metadata: Metadata = {
   title: "Smart Waste Management Dashboard",
   description: "AI + IoT Smart Waste Management System",
+  manifest: "/manifest.json",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "default",
+    title: "Smart Waste Driver",
+  },
+  formatDetection: { telephone: false },
+  icons: {
+    apple: "/icons/icon-192.png",
+  },
 }
 
 export default function RootLayout({

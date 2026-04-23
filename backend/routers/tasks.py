@@ -11,7 +11,7 @@ from typing import List, Optional
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Depends, Query
 from sqlalchemy.orm import Session
 
-from auth_utils import require_admin
+from auth_utils import require_admin, get_current_user
 from database import get_db, TaskDB, CrewDB, BinDB
 from models import Task, CreateTaskRequest, UpdateTaskRequest, AssignTaskRequest
 from utils import get_current_timestamp
@@ -47,8 +47,9 @@ def list_tasks(
     limit: int = Query(default=100, ge=1, le=500, description="Max records to return"),
     offset: int = Query(default=0, ge=0, description="Number of records to skip"),
     db: Session = Depends(get_db),
+    _user = Depends(get_current_user),
 ):
-    """Get all tasks with optional filters."""
+    """Get all tasks with optional filters. Requires authentication."""
     query = db.query(TaskDB)
     if status:
         query = query.filter(TaskDB.status == status)
@@ -71,7 +72,7 @@ def list_tasks(
 
 
 @router.post("/", response_model=Task, status_code=201)
-def create_task(req: CreateTaskRequest, db: Session = Depends(get_db)):
+def create_task(req: CreateTaskRequest, db: Session = Depends(get_db), _user = Depends(get_current_user)):
     if db.query(TaskDB).filter(TaskDB.id == req.id).first():
         raise HTTPException(status_code=409, detail="Task already exists")
 
@@ -98,7 +99,7 @@ def create_task(req: CreateTaskRequest, db: Session = Depends(get_db)):
 
 
 @router.get("/{task_id}", response_model=Task)
-def get_task(task_id: str, db: Session = Depends(get_db)):
+def get_task(task_id: str, db: Session = Depends(get_db), _user = Depends(get_current_user)):
     task_db = db.query(TaskDB).filter(TaskDB.id == task_id).first()
     if not task_db:
         raise HTTPException(status_code=404, detail="Task not found")

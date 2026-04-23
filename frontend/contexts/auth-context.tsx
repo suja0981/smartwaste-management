@@ -1,4 +1,4 @@
-﻿"use client"
+"use client"
 
 /**
  * contexts/auth-context.tsx
@@ -8,12 +8,17 @@
  * without any changes.
  */
 
-import { useEffect, type ReactNode } from "react"
+import { useEffect, useRef, type ReactNode } from "react"
 import { useAuthStore, initAuthListener } from "@/store/auth-store"
 
 export type { AuthUser } from "@/store/auth-store"
 
 export function AuthProvider({ children }: { children: ReactNode }) {
+  // BUG-19 fix removal: The previous useRef guard broke the app in React 18 Strict Mode.
+  // Strict Mode unmounts and remounts components but PRESERVES state/refs.
+  // The first effect call registered the listener, then the simulated unmount
+  // called unsub(), but the simulated remount skipped registration because
+  // the ref was already true. This left the app stuck on a loading spinner forever.
   useEffect(() => {
     const unsub = initAuthListener()
     return unsub

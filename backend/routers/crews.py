@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 from database import get_db, CrewDB
 from models import Crew, CreateCrewRequest, UpdateCrewRequest
 from utils import get_current_timestamp
-from auth_utils import require_admin
+from auth_utils import require_admin, get_current_user
 
 router = APIRouter()
 
@@ -42,8 +42,9 @@ def list_crews(
     limit: int = Query(default=100, ge=1, le=500, description="Max records to return"),
     offset: int = Query(default=0, ge=0, description="Number of records to skip"),
     db: Session = Depends(get_db),
+    _user = Depends(get_current_user),
 ):
-    """Get all crews, optionally filtered by zone or status."""
+    """Get all crews, optionally filtered by zone or status. Requires authentication."""
     query = db.query(CrewDB)
     if zone_id:
         if zone_id == "unassigned":
@@ -56,7 +57,7 @@ def list_crews(
 
 
 @router.post("/", response_model=Crew, status_code=201)
-def create_crew(req: CreateCrewRequest, db: Session = Depends(get_db)):
+def create_crew(req: CreateCrewRequest, db: Session = Depends(get_db), _user = Depends(get_current_user)):
     if db.query(CrewDB).filter(CrewDB.id == req.id).first():
         raise HTTPException(status_code=409, detail="Crew already exists")
 
@@ -79,7 +80,7 @@ def create_crew(req: CreateCrewRequest, db: Session = Depends(get_db)):
 
 
 @router.get("/{crew_id}", response_model=Crew)
-def get_crew(crew_id: str, db: Session = Depends(get_db)):
+def get_crew(crew_id: str, db: Session = Depends(get_db), _user = Depends(get_current_user)):
     crew_db = db.query(CrewDB).filter(CrewDB.id == crew_id).first()
     if not crew_db:
         raise HTTPException(status_code=404, detail="Crew not found")
@@ -146,7 +147,7 @@ def delete_crew(crew_id: str, db: Session = Depends(get_db), _admin=Depends(requ
 
 
 @router.get("/{crew_id}/tasks")
-def get_crew_tasks(crew_id: str, db: Session = Depends(get_db)):
+def get_crew_tasks(crew_id: str, db: Session = Depends(get_db), _user = Depends(get_current_user)):
     """Get all tasks assigned to a specific crew."""
     if not db.query(CrewDB).filter(CrewDB.id == crew_id).first():
         raise HTTPException(status_code=404, detail="Crew not found")

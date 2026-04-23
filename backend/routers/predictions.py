@@ -4,7 +4,7 @@ import uuid
 from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks
 from sqlalchemy.orm import Session
 
-from auth_utils import require_admin
+from auth_utils import require_admin, get_current_user
 from database import get_db, BinDB, TaskDB
 from services.ml_predictor import MLPredictionService
 from pydantic import BaseModel
@@ -83,7 +83,7 @@ class PredictionTaskSyncResponse(BaseModel):
 # ─── Endpoints ────────────────────────────────────────────────────────────────
 
 @router.get("/predict/{bin_id}", response_model=PredictionResponse)
-def predict_fill_time(bin_id: str, db: Session = Depends(get_db)):
+def predict_fill_time(bin_id: str, db: Session = Depends(get_db), _user = Depends(get_current_user)):
     """
     Predict when a specific bin will be full.
     
@@ -113,7 +113,7 @@ def predict_fill_time(bin_id: str, db: Session = Depends(get_db)):
 
 
 @router.get("/analyze/{bin_id}", response_model=BinAnalysisResponse)
-def analyze_bin(bin_id: str, db: Session = Depends(get_db)):
+def analyze_bin(bin_id: str, db: Session = Depends(get_db), _user = Depends(get_current_user)):
     """
     Comprehensive ML analysis of a bin including:
     - Fill time prediction with confidence scoring
@@ -138,7 +138,7 @@ def analyze_bin(bin_id: str, db: Session = Depends(get_db)):
 
 
 @router.get("/collection-priority", response_model=List[str])
-def get_collection_priority(db: Session = Depends(get_db)):
+def get_collection_priority(db: Session = Depends(get_db), _user = Depends(get_current_user)):
     """
     Get bin IDs sorted by collection urgency.
     
@@ -162,7 +162,7 @@ def get_collection_priority(db: Session = Depends(get_db)):
 
 
 @router.get("/anomalies/{bin_id}", response_model=List[AnomalyResponse])
-def detect_anomalies(bin_id: str, db: Session = Depends(get_db)):
+def detect_anomalies(bin_id: str, db: Session = Depends(get_db), _user = Depends(get_current_user)):
     """
     Detect anomalies in current sensor readings.
     Compares current values against historical baselines.
@@ -183,7 +183,7 @@ def detect_anomalies(bin_id: str, db: Session = Depends(get_db)):
 
 
 @router.get("/collection/recommend/{bin_id}", response_model=CollectionRecommendation)
-def get_collection_recommendation(bin_id: str, db: Session = Depends(get_db)):
+def get_collection_recommendation(bin_id: str, db: Session = Depends(get_db), _user = Depends(get_current_user)):
     """
     Get AI-powered collection recommendation for a bin.
     Considers current fill level and predicted fill time.
@@ -204,7 +204,7 @@ def get_collection_recommendation(bin_id: str, db: Session = Depends(get_db)):
 
 
 @router.get("/collection/optimize", response_model=List[str])
-def optimize_collection_order(db: Session = Depends(get_db)):
+def optimize_collection_order(db: Session = Depends(get_db), _user = Depends(get_current_user)):
     """
     Get optimized collection order for all bins.
     Bins are ordered by urgency (fill level + prediction).
@@ -215,7 +215,7 @@ def optimize_collection_order(db: Session = Depends(get_db)):
 
 
 @router.get("/patterns/{bin_id}")
-def get_usage_pattern(bin_id: str):
+def get_usage_pattern(bin_id: str, _user = Depends(get_current_user)):
     """
     Get hourly usage pattern for a bin.
     Shows average fill rate for each hour of the day.
@@ -236,7 +236,7 @@ def get_usage_pattern(bin_id: str):
 
 
 @router.get("/stats")
-def get_ml_statistics():
+def get_ml_statistics(_user = Depends(get_current_user)):
     """Get ML service statistics and health."""
     stats = prediction_service.get_statistics()
     return {
@@ -252,7 +252,7 @@ def get_ml_statistics():
 
 
 @router.post("/seed")
-def seed_ml_from_db(db: Session = Depends(get_db)):
+def seed_ml_from_db(db: Session = Depends(get_db), _admin = Depends(require_admin)):
     """
     Synchronously rebuild in-memory ML models from all persisted telemetry.
 
@@ -272,7 +272,7 @@ def seed_ml_from_db(db: Session = Depends(get_db)):
 
 
 @router.post("/train")
-async def train_models(background_tasks: BackgroundTasks):
+async def train_models(background_tasks: BackgroundTasks, _admin = Depends(require_admin)):
     """
     Trigger model training on historical data.
     Runs in background — prefer /seed for synchronous use (e.g. tests).
@@ -301,7 +301,7 @@ async def train_models(background_tasks: BackgroundTasks):
 
 
 @router.get("/predictions/all")
-def get_all_predictions(db: Session = Depends(get_db)):
+def get_all_predictions(db: Session = Depends(get_db), _user = Depends(get_current_user)):
     """Get predictions for all bins (dashboard overview)."""
     bins = db.query(BinDB).all()
     predictions = []
@@ -327,13 +327,15 @@ def _build_predicted_alerts(bin_rows: List[BinDB], hours_ahead: int) -> List[Dic
             bin_db.id, bin_db.fill_level_percent
         )
         if prediction and prediction["hours_until_full"] <= hours_ahead:
+            h = prediction["hours_until_full"]
+            urgency = "high" if h <= 6 else "medium" if h <= 12 else "low"
             predicted_alerts.append({
                 "bin_id": bin_db.id,
                 "location": bin_db.location,
                 "current_fill": bin_db.fill_level_percent,
-                "hours_until_full": prediction["hours_until_full"],
+                "hours_until_full": h,
                 "predicted_time": prediction["predicted_full_time"],
-                "urgency": "high" if prediction["hours_until_full"] <= 6 else "medium",
+                "urgency": urgency,
             })
 
     predicted_alerts.sort(key=lambda x: x["hours_until_full"])
@@ -449,7 +451,7 @@ def sync_prediction_tasks(
 
 
 @router.get("/alerts/predicted")
-def get_predicted_alerts(hours_ahead: int = 24, db: Session = Depends(get_db)):
+def get_predicted_alerts(hours_ahead: int = 24, db: Session = Depends(get_db), _user = Depends(get_current_user)):
     """Predict which bins will need attention in the next N hours."""
     predicted_alerts = _build_predicted_alerts(db.query(BinDB).all(), hours_ahead)
     return {

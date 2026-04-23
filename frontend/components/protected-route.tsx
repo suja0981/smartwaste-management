@@ -51,6 +51,16 @@ export function AdminOnlyRoute({ children }: { children: ReactNode }) {
     }
   }, [isAuthenticated, isLoading, router, redirecting])
 
+  // BUG-09 fix: auto-redirect authenticated non-admin users to home.
+  // Previously they were shown a static Access Denied screen with no automatic
+  // navigation — they could sit on an admin URL indefinitely.
+  useEffect(() => {
+    if (!isLoading && isAuthenticated && !isAdmin && !redirecting) {
+      setRedirecting(true)
+      router.replace('/')
+    }
+  }, [isAdmin, isAuthenticated, isLoading, router, redirecting])
+
   if (isLoading || redirecting) return <FullScreenLoader />
   if (!isAuthenticated) return <FullScreenLoader />
 

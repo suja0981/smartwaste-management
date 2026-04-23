@@ -30,9 +30,11 @@ class BinFillPredictor:
     - Realistic upper bounds on predictions
     """
 
-    MAX_POINTS = 480   # ~8 hours at 1 reading/min for better stability
+    MAX_POINTS = 480              # ~8 hours at 1 reading/min for better stability
     MIN_POINTS_FOR_PREDICTION = 20
-    MAX_HOURS_PREDICTION = 72  # Unrealistic to predict beyond 3 days
+    MAX_HOURS_PREDICTION = 72       # Unrealistic to predict beyond 3 days
+    MAX_FILL_RATE_PER_HOUR = 100.0  # Physical upper bound: 0→100% in <1 hour is unrealistic
+    MIN_INTERVAL_SECONDS = 60       # Ignore rate from readings closer than this (too noisy)
 
     def __init__(self):
         # bin_id → list of (datetime, fill_level_int)
@@ -78,7 +80,10 @@ class BinFillPredictor:
             curr_time, curr_level = data[i]
 
             time_delta = (curr_time - prev_time).total_seconds()
-            if time_delta <= 0:  # Skip concurrent/reversed timestamps
+            # Skip reversed/concurrent timestamps and readings too close together
+            # (short intervals produce wildly inflated per-hour rates due to
+            # integer fill-level precision).
+            if time_delta < self.MIN_INTERVAL_SECONDS:
                 continue
 
             hours = time_delta / 3600
@@ -87,8 +92,8 @@ class BinFillPredictor:
             # Only count filling periods (delta > 0), ignore emptying/resets
             if delta > 0:
                 rate = delta / hours
-                # Sanity check: rate should be reasonable (<100% per minute)
-                if 0 < rate < 6000:  # 6000% per hour = 100% per minute max
+                # Cap at physical maximum: a bin cannot fill more than 100 %/hour
+                if 0 < rate <= self.MAX_FILL_RATE_PER_HOUR:
                     rates.append(rate)
 
         return rates
@@ -240,7 +245,7 @@ class BinFillPredictor:
             hours = (curr_time - prev_time).total_seconds() / 3600
             if hours > 0 and curr_level > prev_level and hours < 1:  # Only short intervals
                 rate = (curr_level - prev_level) / hours
-                if 0 < rate < 6000:  # Sanity check
+                if 0 < rate <= self.MAX_FILL_RATE_PER_HOUR:  # Use class constant
                     hourly[curr_time.hour].append(rate)
 
         return {
@@ -663,8 +668,19 @@ class MLPredictionService:
             logger.error(f"[ML] Error analyzing bin {bin_id}: {e}")
             return {
                 "bin_id": bin_id,
-                "error": str(e),
+                "current_fill": current_data.get("fill_level_percent", 0),
+                "prediction": None,
+                "anomalies": [],
+                "collection_recommendation": {
+                    "should_collect": False,
+                    "urgency": "unknown",
+                    "reason": f"Analysis error: {e}",
+                    "recommended_time": "check again later",
+                    "confidence": 0.0,
+                },
+                "usage_pattern": {},
                 "analysis_timestamp": _now().isoformat(),
+                "data_quality": {},
             }
 
     def get_statistics(self) -> dict:

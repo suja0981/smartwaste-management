@@ -109,7 +109,9 @@ export function PredictionServiceHealth() {
                             <Database className="h-4 w-4 text-purple-600" />
                             <p className="text-xs font-medium text-muted-foreground">Data Points</p>
                         </div>
-                        <p className="text-2xl font-bold">{(dataPoints / 1000).toFixed(1)}K</p>
+                        <p className="text-2xl font-bold">
+                            {dataPoints >= 1000 ? `${(dataPoints / 1000).toFixed(1)}K` : dataPoints}
+                        </p>
                         <p className="text-xs text-muted-foreground mt-1">In memory</p>
                     </div>
 

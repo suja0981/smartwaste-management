@@ -29,6 +29,11 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     """Adds standard HTTP security headers to every response."""
 
     async def dispatch(self, request: Request, call_next):
+        # BaseHTTPMiddleware must not intercept WebSocket upgrade requests —
+        # doing so corrupts the ASGI send/receive channels for the WS protocol.
+        if request.scope["type"] == "websocket":
+            return await call_next(request)
+
         response = await call_next(request)
 
         response.headers["X-Content-Type-Options"] = "nosniff"
@@ -65,6 +70,9 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         self.last_cleanup = time.time()
 
     async def dispatch(self, request: Request, call_next):
+        if request.scope["type"] == "websocket":
+            return await call_next(request)
+
         client_ip = request.client.host if request.client else "unknown"
 
         now = time.time()
@@ -123,6 +131,9 @@ class AuthRateLimitMiddleware(BaseHTTPMiddleware):
         self.last_cleanup = time.time()
 
     async def dispatch(self, request: Request, call_next):
+        if request.scope["type"] == "websocket":
+            return await call_next(request)
+
         if not request.url.path.startswith("/auth/"):
             return await call_next(request)
 
@@ -194,6 +205,9 @@ class InputValidationMiddleware(BaseHTTPMiddleware):
     _MAX_BYTES = 10 * 1024 * 1024  # 10 MB
 
     async def dispatch(self, request: Request, call_next):
+        if request.scope["type"] == "websocket":
+            return await call_next(request)
+
         content_length = request.headers.get("content-length")
         if content_length:
             try:

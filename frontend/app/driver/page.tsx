@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useRef, useState } from "react"
-import { useRouter } from "next/navigation"
+import { useRouter, useSearchParams } from "next/navigation"
 import { useAuth } from "@/contexts/auth-context"
 import {
   completeDriverTask,
@@ -36,10 +36,14 @@ function FillBar({ level }: { level: number }) {
 export default function DriverPage() {
   const { isAuthenticated, isLoading } = useAuth()
   const router = useRouter()
+  const searchParams = useSearchParams()
 
   const [tasks, setTasks] = useState<DriverTask[]>([])
   const [route, setRoute] = useState<DriverRoute | null>(null)
-  const [tab, setTab] = useState<"tasks" | "route">("tasks")
+  // Read initial tab from URL so manifest shortcuts (/driver?tab=route) work.
+  const [tab, setTab] = useState<"tasks" | "route">(
+    searchParams.get("tab") === "route" ? "route" : "tasks"
+  )
   const [toast, setToast] = useState("")
   const [busyKey, setBusyKey] = useState<string | null>(null)
   const gpsTimer = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -71,6 +75,17 @@ export default function DriverPage() {
       fetchData()
     }
   }, [fetchData, isAuthenticated])
+
+  // Register the PWA service worker once the driver page mounts.
+  // Fails silently on unsupported browsers (e.g. Safari desktop).
+  useEffect(() => {
+    if ("serviceWorker" in navigator) {
+      navigator.serviceWorker
+        .register("/sw.js", { scope: "/driver" })
+        .catch((err) => console.warn("[SW] Registration failed:", err))
+    }
+  }, [])
+
 
   useEffect(() => {
     if (!route || route.status !== "active") {

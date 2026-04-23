@@ -2,10 +2,11 @@ from datetime import datetime
 from typing import List, Optional
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
+from auth_utils import get_current_user, require_admin
 from database import BinDB, CrewDB, RouteDB, RouteHistoryDB, TaskDB, get_db
 from models import (
     CompareRoutesRequest,
@@ -300,7 +301,7 @@ def _finalize_route(
 
 
 @router.post("/optimize", response_model=RouteOptimizationResult)
-def optimize_route(req: OptimizeRouteRequest, db: Session = Depends(get_db)):
+def optimize_route(req: OptimizeRouteRequest, db: Session = Depends(get_db), _user = Depends(get_current_user)):
     bins = db.query(BinDB).filter(BinDB.id.in_(req.bin_ids)).all()
 
     if len(bins) != len(req.bin_ids):
@@ -379,7 +380,7 @@ def optimize_route(req: OptimizeRouteRequest, db: Session = Depends(get_db)):
 
 
 @router.post("/compare", response_model=RouteComparison)
-def compare_routes(req: CompareRoutesRequest, db: Session = Depends(get_db)):
+def compare_routes(req: CompareRoutesRequest, db: Session = Depends(get_db), _user = Depends(get_current_user)):
     bins = db.query(BinDB).filter(BinDB.id.in_(req.bin_ids)).all()
     if len(bins) != len(req.bin_ids):
         raise HTTPException(status_code=404, detail="Some bins not found")
@@ -438,9 +439,10 @@ def compare_routes(req: CompareRoutesRequest, db: Session = Depends(get_db)):
 
 @router.get("/", response_model=List[Route])
 def list_routes(
-    status: str = None,
-    crew_id: str = None,
+    status: Optional[str] = Query(default=None, description="Filter by status"),
+    crew_id: Optional[str] = Query(default=None, description="Filter by crew"),
     db: Session = Depends(get_db),
+    _user = Depends(get_current_user),
 ):
     query = db.query(RouteDB)
     if status:
@@ -452,7 +454,7 @@ def list_routes(
 
 
 @router.get("/analytics/performance")
-def get_route_analytics(db: Session = Depends(get_db)):
+def get_route_analytics(db: Session = Depends(get_db), _user = Depends(get_current_user)):
     history_rows = db.query(RouteHistoryDB).all()
     if not history_rows:
         return {
@@ -478,7 +480,7 @@ def get_route_analytics(db: Session = Depends(get_db)):
 
 
 @router.get("/{route_id}", response_model=Route)
-def get_route(route_id: str, db: Session = Depends(get_db)):
+def get_route(route_id: str, db: Session = Depends(get_db), _user = Depends(get_current_user)):
     route_db = db.query(RouteDB).filter(RouteDB.id == route_id).first()
     if not route_db:
         raise HTTPException(status_code=404, detail="Route not found")
@@ -490,6 +492,7 @@ def update_route_status(
     route_id: str,
     req: UpdateRouteStatusRequest,
     db: Session = Depends(get_db),
+    _user = Depends(get_current_user),
 ):
     route_db = db.query(RouteDB).filter(RouteDB.id == route_id).first()
     if not route_db:
@@ -579,7 +582,7 @@ def update_route_status(
 
 
 @router.delete("/{route_id}", status_code=204)
-def delete_route(route_id: str, db: Session = Depends(get_db)):
+def delete_route(route_id: str, db: Session = Depends(get_db), _admin = Depends(require_admin)):
     route_db = db.query(RouteDB).filter(RouteDB.id == route_id).first()
     if not route_db:
         raise HTTPException(status_code=404, detail="Route not found")

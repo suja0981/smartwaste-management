@@ -14,7 +14,7 @@ Important: The WebSocket broadcast is fire-and-forget (asyncio.create_task).
 import asyncio
 import logging
 
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks
 from sqlalchemy.orm import Session
 
 from database import get_db, BinDB, TelemetryDB
@@ -33,10 +33,10 @@ _CRIT_THRESHOLD = 90
 @router.post("/", status_code=202)
 async def ingest_telemetry(
     payload: TelemetryPayload,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     _auth: dict = Depends(get_device_or_user),
 ):
-   
     bin_db = db.query(BinDB).filter(BinDB.id == payload.bin_id).first()
     if not bin_db:
         raise HTTPException(status_code=404, detail="Bin not registered")
@@ -96,8 +96,12 @@ async def ingest_telemetry(
         _trigger_push_notification_async(old_fill, new_fill, bin_db, db)
     )
 
-    # ── Feed prediction models (non-blocking) ──────────────────────────────
-    _ingest_prediction_and_sync_tasks(
+    # ── Feed prediction models (non-blocking via BackgroundTasks) ──────────
+    # BUG-01 fix: was a direct sync call inside this async handler, blocking
+    # the event loop on every IoT push. BackgroundTasks runs after the
+    # response is sent so the HTTP latency is unaffected.
+    background_tasks.add_task(
+        _ingest_prediction_and_sync_tasks,
         payload.bin_id,
         {
             "fill_level_percent": payload.fill_level_percent,
@@ -105,7 +109,6 @@ async def ingest_telemetry(
             "temperature_c": payload.temperature_c,
             "humidity_percent": payload.humidity_percent,
         },
-        db,
     )
 
     return {
@@ -143,41 +146,27 @@ async def _trigger_push_notification_async(
         logger.warning(f"[FCM] Notification failed for {bin_db.id}: {e}")
 
 
-def _ingest_prediction_and_sync_tasks(bin_id: str, telemetry_data: dict, db: Session) -> None:
+def _ingest_prediction_and_sync_tasks(bin_id: str, telemetry_data: dict) -> None:
     """
-    Feed telemetry to prediction models.
-    Runs as a background task to avoid blocking the HTTP response.
+    Feed telemetry to prediction models and auto-sync collection tasks.
+    Runs as a FastAPI BackgroundTask (after response is sent). Creates its
+    own DB session so the request-scoped session is not accessed after it
+    has been closed.
     """
+    from database import SessionLocal
+    db = SessionLocal()
     try:
         from routers.predictions import prediction_service, sync_prediction_tasks
         prediction_service.ingest_telemetry(bin_id, telemetry_data)
         sync_prediction_tasks(db, hours_ahead=24, target_bin_ids=[bin_id])
     except Exception as e:
         logger.warning(f"[prediction] Ingestion/task sync failed for {bin_id}: {e}")
+    finally:
+        db.close()
 
 
-def _trigger_push_notification(
-    old_fill: int, new_fill: int, bin_db: BinDB, db: Session
-) -> None:
-    """
-    Fire an FCM notification only when the bin crosses a threshold for the
-    first time (not on every reading while it's already above the threshold).
-    """
-    try:
-        from services.notifications import notify_bin_fill_warning
-
-        crossed_critical = old_fill < _CRIT_THRESHOLD <= new_fill
-        crossed_warning = old_fill < _WARN_THRESHOLD <= new_fill and new_fill < _CRIT_THRESHOLD
-
-        if crossed_critical or crossed_warning:
-            notify_bin_fill_warning(
-                bin_id=bin_db.id,
-                location=bin_db.location,
-                fill_level=new_fill,
-                db=db,
-            )
-    except Exception as e:
-        logger.warning(f"[FCM] Notification failed for {bin_db.id}: {e}")
+# BUG-02 fix: removed dead _trigger_push_notification() (sync variant, was
+# never called — _trigger_push_notification_async is the live version above).
 
 
 @router.get("/{bin_id}")
@@ -185,8 +174,9 @@ def get_telemetry_history(
     bin_id: str,
     limit: int = 100,
     db: Session = Depends(get_db),
+    _auth: dict = Depends(get_device_or_user),
 ):
-    """Return the last N telemetry readings for a bin. No auth required (read-only)."""
+    """Return the last N telemetry readings for a bin. Requires JWT or IoT API key."""
     bin_db = db.query(BinDB).filter(BinDB.id == bin_id).first()
     if not bin_db:
         raise HTTPException(status_code=404, detail="Bin not found")

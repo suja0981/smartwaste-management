@@ -93,10 +93,15 @@ export function useRealtimeBins(
   const retryDelay = useRef(INITIAL_RETRY_MS)
   const retryTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const unmounted = useRef(false)
+  // BUG-11 fix: tracks whether auth was explicitly rejected by the server.
+  // When true, the onclose handler skips the retry so we don't hammer the
+  // server with reconnects that will always fail with the same bad token.
+  const authFailed = useRef(false)
 
   const connect = useCallback(() => {
     if (!token || !enabled || unmounted.current) return
 
+    authFailed.current = false // reset on each connection attempt
     // Security fix: never embed the JWT in the URL — it is logged in plaintext
     // by every proxy, load balancer, and server access log. Send the token as
     // the first WebSocket message after the connection is established instead.
@@ -122,6 +127,7 @@ export function useRealtimeBins(
         }
 
         if (data.event === "auth_error") {
+          authFailed.current = true // prevent retry loop (BUG-11)
           socket.close()
           return
         }
@@ -144,7 +150,7 @@ export function useRealtimeBins(
     }
 
     socket.onclose = () => {
-      if (unmounted.current) return
+      if (unmounted.current || authFailed.current) return // no retry on auth failure
       setConnected(false)
       ws.current = null
 

@@ -10,7 +10,7 @@ import { cn } from "@/lib/utils"
 
 export function MLPredictionsCard() {
   const { data: predictions = [], isLoading } = useQuery({
-    queryKey: ["predictions"],
+    queryKey: ["predictions-widget"],
     queryFn: async () => {
       const result = await getAllPredictions()
       return result.predictions.slice(0, 4)

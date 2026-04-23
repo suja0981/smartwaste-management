@@ -67,7 +67,10 @@ class ConnectionManager:
         self._connections: Dict[WebSocket, str] = {}
 
     async def connect(self, websocket: WebSocket, user_email: str) -> None:
-        await websocket.accept()
+        # NOTE: websocket.accept() is intentionally NOT called here.
+        # The websocket_endpoint already accepts the connection before
+        # calling this method, so calling accept() again would raise:
+        #   RuntimeError: Expected 'websocket.send'/'websocket.close', got 'websocket.accept'
         self._connections[websocket] = user_email
         logger.info(f"[WS] {user_email} connected — {len(self._connections)} clients online")
 
@@ -156,6 +159,20 @@ def _verify_ws_token(token: str) -> Optional[str]:
             return None
         if payload.get("type", "access") != "access":
             return None
+        # BE-06 fix: check the token blacklist so revoked tokens (from logout)
+        # cannot be used to open new WebSocket connections.
+        jti = payload.get("jti")
+        if jti:
+            db = SessionLocal()
+            try:
+                from database import TokenBlacklistDB
+                revoked = db.query(TokenBlacklistDB).filter(
+                    TokenBlacklistDB.token_jti == jti
+                ).first()
+                if revoked:
+                    return None
+            finally:
+                db.close()
         return email
     except JWTError:
         return None

@@ -181,7 +181,9 @@ def complete_task(
 
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
-    if crew and task.crew_id != crew.id:
+    if not crew:
+        raise HTTPException(status_code=403, detail="No crew found for this user — cannot complete tasks")
+    if task.crew_id and task.crew_id != crew.id:
         raise HTTPException(status_code=403, detail="Task belongs to a different crew")
 
     completed_at = get_current_timestamp()

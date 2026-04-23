@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from database import get_db, BinDB
 from models import Bin, CreateBinRequest, UpdateBinRequest
 from utils import get_current_timestamp, determine_bin_status
-from auth_utils import require_admin
+from auth_utils import get_current_user, require_admin
 
 router = APIRouter()
 
@@ -33,6 +33,7 @@ def list_bins(
     limit: int = Query(default=100, ge=1, le=500, description="Max records to return"),
     offset: int = Query(default=0, ge=0, description="Number of records to skip"),
     db: Session = Depends(get_db),
+    _user = Depends(get_current_user),
 ):
     """Get all bins, optionally filtered by zone, status, or minimum fill level."""
     query = db.query(BinDB)
@@ -53,7 +54,7 @@ def list_bins(
 
 
 @router.post("/", response_model=Bin, status_code=201)
-def create_bin(req: CreateBinRequest, db: Session = Depends(get_db)):
+def create_bin(req: CreateBinRequest, db: Session = Depends(get_db), _admin = Depends(require_admin)):
     """Create a new bin."""
     if db.query(BinDB).filter(BinDB.id == req.id).first():
         raise HTTPException(status_code=409, detail="Bin already exists")
@@ -75,7 +76,7 @@ def create_bin(req: CreateBinRequest, db: Session = Depends(get_db)):
 
 
 @router.get("/{bin_id}", response_model=Bin)
-def get_bin(bin_id: str, db: Session = Depends(get_db)):
+def get_bin(bin_id: str, db: Session = Depends(get_db), _user = Depends(get_current_user)):
     bin_db = db.query(BinDB).filter(BinDB.id == bin_id).first()
     if not bin_db:
         raise HTTPException(status_code=404, detail="Bin not found")
@@ -83,7 +84,7 @@ def get_bin(bin_id: str, db: Session = Depends(get_db)):
 
 
 @router.patch("/{bin_id}", response_model=Bin)
-def update_bin(bin_id: str, req: UpdateBinRequest, db: Session = Depends(get_db)):
+def update_bin(bin_id: str, req: UpdateBinRequest, db: Session = Depends(get_db), _admin = Depends(require_admin)):
     bin_db = db.query(BinDB).filter(BinDB.id == bin_id).first()
     if not bin_db:
         raise HTTPException(status_code=404, detail="Bin not found")

@@ -15,7 +15,7 @@ import { useToast } from "@/hooks/use-toast"
 import { getBins, getCrews, getRoutes, type Bin, type Crew, type Route } from "@/lib/api-client"
 import { mergeRealtimeBinUpdates, useRealtimeBinsContext } from "@/hooks/useRealtimeBins"
 import { mapBinStatus } from "@/lib/status-mapper"
-import { Trash2, Users, Route as RouteIcon, RefreshCw, Loader2, MapPin } from "lucide-react"
+import { Trash2, Users, Route as RouteIcon, RefreshCw, Loader2, MapPin, X } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useTheme } from "next-themes"
 
@@ -100,7 +100,7 @@ export function MapClient() {
   const queryClient = useQueryClient()
 
   // ── TanStack Query: bins, crews, routes polled every 60 s ──────────────────
-  const { data: fetchedBins = [], isLoading: binsLoading } = useQuery<Bin[]>({
+  const { data: fetchedBins = [], isLoading: binsLoading, isError: binsError } = useQuery<Bin[]>({
     queryKey: ["bins"],
     queryFn: () => getBins(),
     refetchInterval: POLL_INTERVAL,
@@ -122,7 +122,9 @@ export function MapClient() {
   })
 
   const loading = binsLoading || crewsLoading
-  const error: string | null = null  // query errors surface via toast on retry
+  // MAP-01 fix: derive a real error message from the bins query instead of the
+  // previous hardcoded `null` which made the error UI permanently unreachable.
+  const error: string | null = binsError ? "Failed to load map data. Check your connection." : null
 
   // ── Merge realtime WS updates on top of queried bins ──────────────────────
   const [displayBins, setDisplayBins] = useState<Bin[]>(fetchedBins)
@@ -177,7 +179,14 @@ export function MapClient() {
     })
 
     mapRef.current = map
-    map.invalidateSize()
+
+    // MAP-04 fix: defer invalidateSize() by one animation frame so the
+    // browser has painted the container at its final dimensions before
+    // Leaflet measures it. Without this, tile grids render grey/offset
+    // until the user triggers a resize event.
+    requestAnimationFrame(() => {
+      map.invalidateSize()
+    })
 
     return () => {
       // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -248,7 +257,29 @@ export function MapClient() {
         marker.addTo(map)
         binMarkers.current.set(bin.id, marker)
       })
-  }, [displayBins, selected, showBins, statusFilter])
+  }, [displayBins, showBins, statusFilter])
+  // MAP-03 fix: don't put `selected` in the heavy marker-rebuild effect.
+  // Instead, use a separate lightweight effect that only updates the icon
+  // of the two affected markers (previously selected + newly selected).
+  const prevSelectedBinId = useRef<string | null>(null)
+  useEffect(() => {
+    const prev = prevSelectedBinId.current
+    const next = selected?.type === "bin" ? selected.data.id : null
+    if (prev === next) return
+    // Deselect old marker
+    if (prev) {
+      const m = binMarkers.current.get(prev)
+      const b = displayBins.find((x) => x.id === prev)
+      if (m && b) m.setIcon(makeBinIcon(b.fill_level_percent, false))
+    }
+    // Select new marker
+    if (next) {
+      const m = binMarkers.current.get(next)
+      const b = displayBins.find((x) => x.id === next)
+      if (m && b) m.setIcon(makeBinIcon(b.fill_level_percent, true))
+    }
+    prevSelectedBinId.current = next
+  }, [selected, displayBins])
 
   useEffect(() => {
     const map = mapRef.current
@@ -280,7 +311,25 @@ export function MapClient() {
       marker.addTo(map)
       crewMarkers.current.set(crew.id, marker)
     })
-  }, [crews, selected, showCrews])
+  }, [crews, showCrews])
+  // MAP-03 fix: lightweight crew icon update for selection, same pattern as bins.
+  const prevSelectedCrewId = useRef<string | null>(null)
+  useEffect(() => {
+    const prev = prevSelectedCrewId.current
+    const next = selected?.type === "crew" ? selected.data.id : null
+    if (prev === next) return
+    if (prev) {
+      const m = crewMarkers.current.get(prev)
+      const c = crews.find((x) => x.id === prev)
+      if (m && c) m.setIcon(makeCrewIcon(c.status, false))
+    }
+    if (next) {
+      const m = crewMarkers.current.get(next)
+      const c = crews.find((x) => x.id === next)
+      if (m && c) m.setIcon(makeCrewIcon(c.status, true))
+    }
+    prevSelectedCrewId.current = next
+  }, [selected, crews])
 
   useEffect(() => {
     const map = mapRef.current
@@ -433,7 +482,8 @@ export function MapClient() {
               </div>
             ))}
             <div className="ml-auto flex gap-1">
-              {["all", "critical", "warning", "normal"].map((filterValue) => (
+              {/* MAP-02 fix: added "offline" so offline bins can be isolated on the map */}
+              {["all", "critical", "warning", "normal", "offline"].map((filterValue) => (
                 <Button
                   key={filterValue}
                   variant={statusFilter === filterValue ? "default" : "outline"}
@@ -565,8 +615,9 @@ export function MapClient() {
                   <CardTitle className="text-sm">
                     {selected.type === "bin" ? "Bin Detail" : "Crew Detail"}
                   </CardTitle>
-                  <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={() => setSelected(null)}>
-                    x
+                  {/* MAP-05 fix: use X icon with aria-label instead of plain "x" text */}
+                  <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={() => setSelected(null)} aria-label="Close detail panel">
+                    <X className="h-3.5 w-3.5" />
                   </Button>
                 </div>
               </CardHeader>

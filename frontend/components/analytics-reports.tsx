@@ -52,11 +52,11 @@ import { cn } from "@/lib/utils"
 // ─── Colour palette consistent with CSS vars ─────────────────────────────────
 
 const COLORS = [
-  "hsl(var(--chart-1))",
-  "hsl(var(--chart-2))",
-  "hsl(var(--chart-3))",
-  "hsl(var(--chart-4))",
-  "hsl(var(--chart-5))",
+  "var(--chart-1)",
+  "var(--chart-2)",
+  "var(--chart-3)",
+  "var(--chart-4)",
+  "var(--chart-5)",
 ]
 
 // ─── Main component ───────────────────────────────────────────────────────────
@@ -341,7 +341,7 @@ export function AnalyticsReports() {
                       <XAxis dataKey="range" tick={{ fontSize: 11 }} />
                       <YAxis tick={{ fontSize: 11 }} />
                       <Tooltip />
-                      <Bar dataKey="count" fill="hsl(var(--chart-1))" radius={[4, 4, 0, 0]} />
+                      <Bar dataKey="count" fill="var(--chart-1)" radius={[4, 4, 0, 0]} />
                     </BarChart>
                   </ResponsiveContainer>
                 )}
@@ -374,8 +374,8 @@ export function AnalyticsReports() {
                         type="monotone"
                         dataKey="average_fill"
                         name="Average Fill"
-                        stroke="hsl(var(--chart-1))"
-                        fill="hsl(var(--chart-1))"
+                        stroke="var(--chart-1)"
+                        fill="var(--chart-1)"
                         fillOpacity={0.18}
                         strokeWidth={2}
                       />
@@ -405,7 +405,7 @@ export function AnalyticsReports() {
                       <Bar
                         dataKey="telemetry_readings"
                         name="Telemetry Readings"
-                        fill="hsl(var(--chart-2))"
+                        fill="var(--chart-2)"
                         radius={[4, 4, 0, 0]}
                       />
                     </BarChart>
@@ -491,13 +491,13 @@ export function AnalyticsReports() {
                         <Bar
                           dataKey="averageFill"
                           name="Average Fill"
-                          fill="hsl(var(--chart-1))"
+                          fill="var(--chart-1)"
                           radius={[4, 4, 0, 0]}
                         />
                         <Bar
                           dataKey="critical"
                           name="Critical Bins"
-                          fill="hsl(var(--chart-3))"
+                          fill="var(--chart-3)"
                           radius={[4, 4, 0, 0]}
                         />
                       </BarChart>
@@ -570,8 +570,8 @@ export function AnalyticsReports() {
                       type="monotone"
                       dataKey="tasks_created"
                       name="Tasks Created"
-                      stroke="hsl(var(--chart-4))"
-                      fill="hsl(var(--chart-4))"
+                      stroke="var(--chart-4)"
+                      fill="var(--chart-4)"
                       fillOpacity={0.18}
                       strokeWidth={2}
                     />
@@ -579,8 +579,8 @@ export function AnalyticsReports() {
                       type="monotone"
                       dataKey="tasks_completed"
                       name="Tasks Completed"
-                      stroke="hsl(var(--chart-3))"
-                      fill="hsl(var(--chart-3))"
+                      stroke="var(--chart-3)"
+                      fill="var(--chart-3)"
                       fillOpacity={0.16}
                       strokeWidth={2}
                     />
@@ -688,7 +688,7 @@ export function AnalyticsReports() {
                       <Bar
                         dataKey="routes_completed"
                         name="Routes Completed"
-                        fill="hsl(var(--chart-5))"
+                        fill="var(--chart-5)"
                         radius={[4, 4, 0, 0]}
                       />
                     </BarChart>
@@ -721,8 +721,8 @@ export function AnalyticsReports() {
                         type="monotone"
                         dataKey="bins_collected"
                         name="Bins Collected"
-                        stroke="hsl(var(--chart-1))"
-                        fill="hsl(var(--chart-1))"
+                        stroke="var(--chart-1)"
+                        fill="var(--chart-1)"
                         fillOpacity={0.16}
                         strokeWidth={2}
                       />
@@ -731,8 +731,8 @@ export function AnalyticsReports() {
                         type="monotone"
                         dataKey="distance_km"
                         name="Distance (km)"
-                        stroke="hsl(var(--chart-2))"
-                        fill="hsl(var(--chart-2))"
+                        stroke="var(--chart-2)"
+                        fill="var(--chart-2)"
                         fillOpacity={0.12}
                         strokeWidth={2}
                       />

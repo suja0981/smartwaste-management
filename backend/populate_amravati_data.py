@@ -1,47 +1,42 @@
 """
-populate_test_data.py — Seed the database with realistic demo data.
+populate_amravati_data.py — Seed the database with demo data for Amravati.
 
-Run this after starting the backend to quickly set up a demo environment:
-  python populate_test_data.py
+Run this after starting the backend:
+  python populate_amravati_data.py
 
 What it does:
-  1. Creates 15 bins across Nagpur with real coordinates
-  2. Creates 3 collection crews
-  3. Creates 3 sample tasks
+  1. Creates 10 bins across Amravati with real coordinates (bin01–bin10)
+  2. Creates 3 collection crews (crew4–crew6)
+  3. Creates 3 sample tasks referencing Amravati bins
   4. Optimizes and saves 3 demo routes
-  5. Sends telemetry for the first 10 bins
-  6. Prints a summary of current system stats
+  5. Sends one telemetry reading per bin
+  6. Prints system statistics
 
-NOTE: Telemetry requires auth. Set IOT_API_KEY or IOT_BEARER_TOKEN in your
-environment before running, otherwise the telemetry step will be skipped.
+Auth for telemetry: set IOT_API_KEY or IOT_BEARER_TOKEN in your environment,
+or the telemetry step will be skipped.
 """
 
 import os
 import requests
 import random
 
-API_BASE = "https://smartwaste-management.onrender.com"
+API_BASE = os.getenv("SIM_API_BASE_URL", "http://localhost:8000").rstrip("/")
 
-# Auth for telemetry (requires X-API-Key or Bearer token)
-_API_KEY = os.getenv("IOT_API_KEY", "")
+_API_KEY      = os.getenv("IOT_API_KEY", "")
 _BEARER_TOKEN = os.getenv("IOT_BEARER_TOKEN", "")
 
-NAGPUR_LOCATIONS = [
-    {"name": "Sitabuldi Main Square",  "lat": 21.1497, "lon": 79.0860},
-    {"name": "Dharampeth Church Square","lat": 21.1346, "lon": 79.0669},
-    {"name": "Sadar Bazaar",           "lat": 21.1520, "lon": 79.0877},
-    {"name": "Railway Station",        "lat": 21.1520, "lon": 79.0850},
-    {"name": "Civil Lines",            "lat": 21.1575, "lon": 79.0746},
-    {"name": "Empress Mall",           "lat": 21.1456, "lon": 79.0883},
-    {"name": "Gandhi Sagar Lake",      "lat": 21.1389, "lon": 79.0921},
-    {"name": "Futala Lake",            "lat": 21.1261, "lon": 79.0583},
-    {"name": "Ambazari Lake",          "lat": 21.1124, "lon": 79.0333},
-    {"name": "Kasturchand Park",       "lat": 21.1508, "lon": 79.0904},
-    {"name": "Variety Square",         "lat": 21.1469, "lon": 79.0846},
-    {"name": "Shankar Nagar Square",   "lat": 21.1175, "lon": 79.0745},
-    {"name": "Medical Square",         "lat": 21.1343, "lon": 79.0850},
-    {"name": "Congress Nagar",         "lat": 21.1088, "lon": 79.0542},
-    {"name": "Mankapur Square",        "lat": 21.1258, "lon": 79.0992},
+# Real Amravati landmarks with approximate GPS coordinates
+AMRAVATI_LOCATIONS = [
+    {"name": "Rajkamal Chowk",        "lat": 20.9374, "lon": 77.7796},
+    {"name": "Irwin Square",          "lat": 20.9330, "lon": 77.7820},
+    {"name": "Rajapeth Market",       "lat": 20.9411, "lon": 77.7762},
+    {"name": "Panchavati Bus Stand",  "lat": 20.9346, "lon": 77.7769},
+    {"name": "Gadhav Naka",           "lat": 20.9388, "lon": 77.7834},
+    {"name": "Badnera Road",          "lat": 20.9450, "lon": 77.7900},
+    {"name": "Cotton Market",         "lat": 20.9310, "lon": 77.7720},
+    {"name": "Shukrawar Pete",        "lat": 20.9368, "lon": 77.7740},
+    {"name": "Ambapeth",              "lat": 20.9208, "lon": 77.7650},
+    {"name": "Stadium Road",          "lat": 20.9425, "lon": 77.7868},
 ]
 
 
@@ -54,12 +49,12 @@ def _telemetry_headers() -> dict:
 
 
 def create_bins():
-    print("\n--- Creating bins ---")
+    print("\n--- Creating bins (Amravati) ---")
 
     bin_capacities = [100, 120, 150, 200]
     created = 0
 
-    for i, location in enumerate(NAGPUR_LOCATIONS, 1):
+    for i, location in enumerate(AMRAVATI_LOCATIONS, 1):    # bin01 → bin15
         fill_level = random.randint(20, 98)
         bin_data = {
             "id": f"bin{i:02d}",
@@ -85,38 +80,38 @@ def create_bins():
 
 
 def create_crews():
-    print("\n--- Creating crews ---")
+    print("\n--- Creating crews (Amravati) ---")
 
     crews = [
         {
             "id": "crew1",
-            "name": "Alpha Team",
-            "leader": "Rajesh Kumar",
+            "name": "Delta Team",
+            "leader": "Suresh Patil",
             "members_count": 3,
-            "phone": "+91-9876543210",
-            "email": "alpha@nagpurwaste.in",
-            "current_latitude": 21.1458,
-            "current_longitude": 79.0882,
+            "phone": "+91-9876543213",
+            "email": "delta@amravatiwaste.in",
+            "current_latitude": 20.9374,
+            "current_longitude": 77.7796,
         },
         {
             "id": "crew2",
-            "name": "Beta Team",
-            "leader": "Priya Sharma",
+            "name": "Epsilon Team",
+            "leader": "Meena Deshpande",
             "members_count": 4,
-            "phone": "+91-9876543211",
-            "email": "beta@nagpurwaste.in",
-            "current_latitude": 21.1346,
-            "current_longitude": 79.0669,
+            "phone": "+91-9876543214",
+            "email": "epsilon@amravatiwaste.in",
+            "current_latitude": 20.9330,
+            "current_longitude": 77.7820,
         },
         {
             "id": "crew3",
-            "name": "Gamma Team",
-            "leader": "Amit Deshmukh",
+            "name": "Zeta Team",
+            "leader": "Anil Kolte",
             "members_count": 3,
-            "phone": "+91-9876543212",
-            "email": "gamma@nagpurwaste.in",
-            "current_latitude": 21.1520,
-            "current_longitude": 79.0850,
+            "phone": "+91-9876543215",
+            "email": "zeta@amravatiwaste.in",
+            "current_latitude": 20.9450,
+            "current_longitude": 77.7900,
         },
     ]
 
@@ -128,7 +123,7 @@ def create_crews():
                 created += 1
                 print(f"  {crew['name']} (leader: {crew['leader']})")
             else:
-                print(f"  [ERR] {crew['id']}: {r.status_code}")
+                print(f"  [ERR] {crew['id']}: {r.status_code} {r.text[:80]}")
         except Exception as e:
             print(f"  [ERR] {crew['id']}: {e}")
 
@@ -137,34 +132,34 @@ def create_crews():
 
 
 def create_tasks():
-    print("\n--- Creating tasks ---")
+    print("\n--- Creating tasks (Amravati) ---")
 
     tasks = [
         {
             "id": "task001",
-            "title": "Emergency Collection — High Fill",
-            "description": "Urgent collection required at Sitabuldi (fill > 90%)",
+            "title": "Emergency Collection — Rajkamal Chowk",
+            "description": "Urgent collection required (fill > 90%)",
             "priority": "high",
-            "location": "Sitabuldi Main Square",
+            "location": "Rajkamal Chowk",
             "bin_id": "bin01",
             "estimated_time_minutes": 30,
         },
         {
             "id": "task002",
-            "title": "Routine Collection — Commercial Area",
-            "description": "Scheduled collection for Sadar Bazaar",
+            "title": "Routine Collection — Cotton Market",
+            "description": "Scheduled collection for Cotton Market area",
             "priority": "medium",
-            "location": "Sadar Bazaar",
-            "bin_id": "bin03",
+            "location": "Cotton Market",
+            "bin_id": "bin07",
             "estimated_time_minutes": 45,
         },
         {
             "id": "task003",
-            "title": "Maintenance Check — Sensor Issue",
-            "description": "Inspect bin sensors at Railway Station",
+            "title": "Maintenance Check — Badnera Road",
+            "description": "Inspect bin sensors at Badnera Road",
             "priority": "low",
-            "location": "Railway Station",
-            "bin_id": "bin04",
+            "location": "Badnera Road",
+            "bin_id": "bin06",
             "estimated_time_minutes": 20,
         },
     ]
@@ -178,7 +173,7 @@ def create_tasks():
                 tag = {"high": "HIGH", "medium": "MED ", "low": "LOW "}[task["priority"]]
                 print(f"  [{tag}] {task['title']}")
             else:
-                print(f"  [ERR] {task['id']}: {r.status_code}")
+                print(f"  [ERR] {task['id']}: {r.status_code} {r.text[:80]}")
         except Exception as e:
             print(f"  [ERR] {task['id']}: {e}")
 
@@ -187,24 +182,24 @@ def create_tasks():
 
 
 def create_sample_routes():
-    print("\n--- Creating optimized routes ---")
+    print("\n--- Creating optimized routes (Amravati) ---")
 
     scenarios = [
         {
             "name": "Morning Collection — Priority",
-            "bins": ["bin01", "bin05", "bin08", "bin12"],
+            "bins": ["bin01", "bin05", "bin07", "bin02"],
             "crew": "crew1",
             "algorithm": "priority",
         },
         {
             "name": "Afternoon Collection — Hybrid",
-            "bins": ["bin02", "bin06", "bin09", "bin13"],
+            "bins": ["bin02", "bin06", "bin08", "bin04"],
             "crew": "crew2",
             "algorithm": "hybrid",
         },
         {
             "name": "Evening Collection — Two-opt",
-            "bins": ["bin03", "bin07", "bin10", "bin14"],
+            "bins": ["bin03", "bin09", "bin10", "bin04"],
             "crew": "crew3",
             "algorithm": "two_opt",
         },
@@ -215,8 +210,12 @@ def create_sample_routes():
         try:
             r = requests.post(
                 f"{API_BASE}/routes/optimize",
-                json={"bin_ids": s["bins"], "crew_id": s["crew"],
-                      "algorithm": s["algorithm"], "save_route": True},
+                json={
+                    "bin_ids": s["bins"],
+                    "crew_id": s["crew"],
+                    "algorithm": s["algorithm"],
+                    "save_route": True,
+                },
                 timeout=10,
             )
             if r.status_code == 200:
@@ -229,7 +228,7 @@ def create_sample_routes():
                     f"time={result['estimated_time_minutes']:.0f}min"
                 )
             else:
-                print(f"  [ERR] {s['name']}: {r.status_code}")
+                print(f"  [ERR] {s['name']}: {r.status_code} {r.text[:80]}")
         except Exception as e:
             print(f"  [ERR] {s['name']}: {e}")
 
@@ -238,30 +237,34 @@ def create_sample_routes():
 
 
 def simulate_telemetry():
-    print("\n--- Sending telemetry ---")
+    print("\n--- Sending telemetry (Amravati bins) ---")
 
     headers = _telemetry_headers()
     if not headers:
         print(
             "  SKIPPED: no auth credentials.\n"
-            "  Set IOT_API_KEY=wsk_live_... in your environment to enable this step."
+            "  Set IOT_API_KEY or IOT_BEARER_TOKEN in your environment to enable this step."
         )
         return 0
 
     sent = 0
-    for i in range(1, 11):
+    for i in range(1, 11):    # bin01 → bin10
         bin_id = f"bin{i:02d}"
         payload = {
             "bin_id": bin_id,
             "fill_level_percent": random.randint(40, 95),
             "battery_percent": random.randint(60, 100),
-            "temperature_c": round(random.uniform(20, 35), 1),
+            "temperature_c": round(random.uniform(22, 36), 1),
             "humidity_percent": random.randint(40, 80),
         }
         try:
-            r = requests.post(f"{API_BASE}/telemetry/", json=payload,
-                              headers=headers, timeout=5)
-            if r.status_code == 202:
+            r = requests.post(
+                f"{API_BASE}/telemetry/",
+                json=payload,
+                headers=headers,
+                timeout=5,
+            )
+            if r.status_code in (200, 202):
                 sent += 1
             else:
                 print(f"  [ERR] {bin_id}: {r.status_code}")
@@ -275,28 +278,19 @@ def simulate_telemetry():
 def show_statistics():
     print("\n--- System statistics ---")
     try:
-        # Correct path: /stats/ not /stats/stats
         stats = requests.get(f"{API_BASE}/stats/", timeout=5).json()
         print(f"  Total bins:        {stats['total_bins']}")
         print(f"  Bins online:       {stats['bins_online']}")
         print(f"  Bins full:         {stats['bins_full']}")
         print(f"  Bins warning:      {stats['bins_warning']}")
         print(f"  Avg fill level:    {stats['average_fill_level']}%")
-
-        route_stats = requests.get(
-            f"{API_BASE}/routes/analytics/performance", timeout=5
-        ).json()
-        if route_stats["total_routes_completed"] > 0:
-            print(f"  Routes completed:  {route_stats['total_routes_completed']}")
-            print(f"  Total distance:    {route_stats['total_distance_km']} km")
-            print(f"  Avg efficiency:    {route_stats['average_efficiency']:.3f} bins/km")
     except Exception as e:
         print(f"  [ERR] {e}")
 
 
 def main():
     print("=" * 62)
-    print("  SMART WASTE MANAGEMENT — TEST DATA POPULATION")
+    print("  SMART WASTE MANAGEMENT — AMRAVATI DATA POPULATION")
     print("=" * 62)
 
     try:
@@ -309,7 +303,7 @@ def main():
         print("Make sure the server is running: uvicorn main:app --reload")
         return
 
-    print("\nBackend server is online. Populating database...\n")
+    print(f"\nBackend online at {API_BASE}. Populating Amravati data...\n")
 
     create_bins()
     create_crews()
@@ -322,9 +316,9 @@ def main():
     print("  DONE")
     print("=" * 62)
     print("\nNext steps:")
-    print("  1. Browse API docs:       http://localhost:8000/docs")
-    print("  2. Test route optimizer:  python test_routes.py")
-    print("  3. Start IoT simulation:  python simulate_iot.py --fast")
+    print("  1. Browse API docs:        http://localhost:8000/docs")
+    print("  2. Start IoT simulation:   python simulate_iot.py --fast")
+    print("  3. Seed ML predictions:    POST /predictions/seed")
     print()
 
 

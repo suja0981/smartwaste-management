@@ -21,6 +21,7 @@ from sqlalchemy.orm import Session
 
 from database import DeviceTokenDB, UserDB, CrewDB
 from firebase_service import _init_firebase
+from models import UserRole
 
 logger = logging.getLogger(__name__)
 
@@ -90,7 +91,7 @@ def _get_tokens_for_users(user_ids: list, db: Session) -> list:
 
 def _get_admin_tokens(db: Session) -> list:
     admins = db.query(UserDB.id).filter(
-        UserDB.role == "admin", UserDB.is_active == True  # noqa: E712
+        UserDB.role == UserRole.ADMIN, UserDB.is_active == True  # noqa: E712
     ).all()
     return _get_tokens_for_users([a.id for a in admins], db)
 
@@ -128,7 +129,7 @@ def notify_task_assigned(
             user_ids.append(user.id)
 
     admins = db.query(UserDB.id).filter(
-        UserDB.role == "admin", UserDB.is_active == True  # noqa: E712
+        UserDB.role == UserRole.ADMIN, UserDB.is_active == True  # noqa: E712
     ).all()
     user_ids += [a.id for a in admins]
 

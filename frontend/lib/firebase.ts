@@ -1,5 +1,27 @@
-import type { FirebaseApp } from "firebase/app"
-import type { Auth, User, UserCredential } from "firebase/auth"
+"use client"
+/**
+ * lib/firebase.ts
+ *
+ * Firebase client-side helpers.
+ *
+ * BUG-18 fix: replaced require() calls with static ES module imports.
+ *   require() is a CommonJS pattern that bypassed bundler tree-shaking and
+ *   mixed module systems. Static imports are the correct Next.js pattern.
+ *   The "use client" directive ensures this module is only bundled for the
+ *   browser (it was always only used from "use client" components).
+ *
+ * BUG-12 fix: exported PUSH_TOKEN_STORAGE_KEY so auth-store.ts can import
+ *   the constant instead of duplicating a magic string.
+ */
+
+import { getApps, initializeApp, type FirebaseApp } from "firebase/app"
+import {
+  getAuth,
+  onAuthStateChanged as _onAuthStateChanged,
+  type Auth,
+  type User,
+  type UserCredential,
+} from "firebase/auth"
 
 const firebaseConfig = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
@@ -11,21 +33,20 @@ const firebaseConfig = {
   measurementId: process.env.NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID,
 }
 
-const PUSH_TOKEN_STORAGE_KEY = "swm_push_token"
+/** Exported so auth-store.ts can reference the same key without duplication. */
+export const PUSH_TOKEN_STORAGE_KEY = "swm_push_token"
 
 let appSingleton: FirebaseApp | null = null
 let authSingleton: Auth | null = null
 
 function getFirebaseApp(): FirebaseApp {
   if (appSingleton) return appSingleton
-  const { getApps, initializeApp } = require("firebase/app")
   appSingleton = getApps().length === 0 ? initializeApp(firebaseConfig) : getApps()[0]
   return appSingleton as FirebaseApp
 }
 
 export function getFirebaseAuth(): Auth {
   if (authSingleton) return authSingleton
-  const { getAuth } = require("firebase/auth")
   authSingleton = getAuth(getFirebaseApp())
   return authSingleton as Auth
 }
@@ -69,8 +90,7 @@ export async function updateFirebaseProfile(user: User, displayName: string): Pr
 }
 
 export function onAuthStateChanged(callback: (user: User | null) => void): () => void {
-  const { onAuthStateChanged: listen } = require("firebase/auth")
-  return listen(getFirebaseAuth(), callback)
+  return _onAuthStateChanged(getFirebaseAuth(), callback)
 }
 
 export async function isPushMessagingSupported(): Promise<boolean> {

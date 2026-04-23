@@ -68,11 +68,17 @@ class Settings(BaseSettings):
         return self.environment.lower() == "production"
 
     def validate_production_secrets(self) -> None:
-        """Raise at startup if insecure defaults are used in production."""
-        if self.is_production():
+        """Raise at startup if insecure defaults are used in production or staging."""
+        sensitive_envs = {"production", "staging"}
+        if self.environment.lower() in sensitive_envs:
             if self.secret_key == "your-super-secret-key-change-this-in-production":
                 raise RuntimeError(
-                    "SECRET_KEY must be changed before running in production. "
+                    "SECRET_KEY must be changed before running in production/staging. "
+                    "Generate one with: python -c \"import secrets; print(secrets.token_hex(32))\""
+                )
+            if len(self.secret_key) < 32:
+                raise RuntimeError(
+                    "SECRET_KEY must be at least 32 characters for production/staging use. "
                     "Generate one with: python -c \"import secrets; print(secrets.token_hex(32))\""
                 )
 

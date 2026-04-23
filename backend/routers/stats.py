@@ -6,7 +6,8 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from sqlalchemy import func, case
 
-from database import get_db, BinDB, TaskDB, CrewDB, TelemetryDB, RouteHistoryDB
+from database import get_db, BinDB, TaskDB, CrewDB, TelemetryDB, RouteHistoryDB, UserDB
+from auth_utils import get_current_user
 
 router = APIRouter()
 
@@ -24,7 +25,7 @@ def _coerce_utc(value: datetime | None) -> datetime | None:
 
 
 @router.get("/")
-def get_dashboard_stats(db: Session = Depends(get_db)):
+def get_dashboard_stats(db: Session = Depends(get_db), _user: UserDB = Depends(get_current_user)):
     """
     Dashboard KPI cards.
     GET /stats/
@@ -75,7 +76,7 @@ def get_dashboard_stats(db: Session = Depends(get_db)):
 
 
 @router.get("/bins")
-def get_bin_stats(db: Session = Depends(get_db)):
+def get_bin_stats(db: Session = Depends(get_db), _user: UserDB = Depends(get_current_user)):
     """
     Bin statistics grouped by status.
     GET /stats/bins
@@ -107,7 +108,7 @@ def get_bin_stats(db: Session = Depends(get_db)):
 
 
 @router.get("/zones")
-def get_zone_stats(db: Session = Depends(get_db)):
+def get_zone_stats(db: Session = Depends(get_db), _user: UserDB = Depends(get_current_user)):
     """
     Statistics grouped by zone.
     GET /stats/zones — Phase 6 multi-zone support.
@@ -141,7 +142,7 @@ def get_zone_stats(db: Session = Depends(get_db)):
 
 
 @router.get("/telemetry/recent")
-def get_recent_telemetry_stats(db: Session = Depends(get_db)):
+def get_recent_telemetry_stats(db: Session = Depends(get_db), _user: UserDB = Depends(get_current_user)):
     """
     Count telemetry readings in the last 24 hours.
     Useful for monitoring data flow from IoT devices.
@@ -162,7 +163,7 @@ def get_recent_telemetry_stats(db: Session = Depends(get_db)):
 
 
 @router.get("/trends")
-def get_trend_stats(days: int = 30, db: Session = Depends(get_db)):
+def get_trend_stats(days: int = 30, db: Session = Depends(get_db), _user: UserDB = Depends(get_current_user)):
     """
     Time-series analytics grouped by UTC day.
     GET /stats/trends?days=30

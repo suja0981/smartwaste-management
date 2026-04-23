@@ -14,7 +14,7 @@ from api_key_services import generate_api_key, revoke_api_key, verify_api_key
 from config import get_settings
 from database import APIKeyDB, TokenBlacklistDB, UserDB, UserSettingsDB, get_db
 from firebase_service import is_firebase_available, verify_firebase_token
-from models import TokenRefreshRequest, TokenResponse, UserLogin, UserRegister, UserResponse
+from models import TokenRefreshRequest, TokenResponse, UserLogin, UserRegister, UserResponse, UserRole
 from security import PasswordPolicy
 
 settings = get_settings()
@@ -201,7 +201,7 @@ def _upsert_firebase_user(decoded_token: dict, db: Session) -> UserDB:
                 email=email,
                 full_name=full_name,
                 hashed_password=None,
-                role="user",
+                role=UserRole.USER,
                 is_active=True,
                 created_at=_now(),
                 firebase_uid=firebase_uid,
@@ -220,6 +220,10 @@ def _upsert_firebase_user(decoded_token: dict, db: Session) -> UserDB:
             if not user:
                 raise HTTPException(status_code=500, detail="Failed to create user account")
     else:
+        # Issue 5 fix: keep full_name in sync with the Firebase profile so
+        # display name updates made in Google/Firebase are reflected in the DB.
+        if full_name and user.full_name != full_name:
+            user.full_name = full_name
         db.commit()
     db.refresh(user)
     _get_or_create_settings(user.id, db)
@@ -268,7 +272,7 @@ def get_current_user(
 
 
 def require_admin(current_user: UserDB = Depends(get_current_user)) -> UserDB:
-    if current_user.role != "admin":
+    if current_user.role != UserRole.ADMIN:
         raise HTTPException(status_code=403, detail="Admin access required")
     return current_user
 
@@ -320,7 +324,7 @@ def signup(user_data: UserRegister, db: Session = Depends(get_db)):
         email=user_data.email,
         full_name=user_data.full_name,
         hashed_password=_hash_password(user_data.password),
-        role="user",
+        role=UserRole.USER,
         is_active=True,
         created_at=_now(),
         auth_provider="local",
